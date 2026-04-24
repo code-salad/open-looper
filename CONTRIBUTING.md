@@ -61,7 +61,7 @@ git log --grep="Loop-Phase:" --oneline
 
 ## Guidelines
 
-- Agents spawn subagents via `Task` tool, not inline execution
+- Agents spawn subagents via `claude-spawn-agent` Bash command, not inline execution
 - All work happens in worktrees, never on default branch
 - Use conventional commits with loop trailers
 - Test changes before committing
