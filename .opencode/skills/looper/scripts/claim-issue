@@ -1,0 +1,110 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# claim-issue — Atomically claim a GitHub issue for the current user
+#
+# Uses a check-then-assign pattern with retry to avoid TOCTOU race
+# conditions where another agent might claim the issue between our
+# check and assign.
+#
+# Usage: claim-issue <ISSUE_NUMBER> [--repo owner/repo]
+#   <ISSUE_NUMBER>  Number of the issue to claim (without #).
+#   --repo owner/repo  Target repo (default: current repo via gh context).
+#
+# Exit codes:
+#   0 = issue successfully claimed
+#   1 = could not claim (already assigned, not open, or retried out)
+#   2 = invalid arguments
+#
+# Stdout: On success, prints the claimed issue number and title:
+#   "Claimed #<N>: <title>"
+
+ISSUE_NUMBER=""
+REPO_ARG=""
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --repo)
+            if [ $# -lt 2 ]; then
+                echo "Usage: claim-issue <ISSUE_NUMBER> [--repo owner/repo]" >&2
+                echo "Error: --repo requires a value" >&2
+                exit 2
+            fi
+            REPO_ARG="$2"
+            shift 2
+            ;;
+        *)
+            if [ -z "$ISSUE_NUMBER" ]; then
+                ISSUE_NUMBER="$1"
+                shift
+            else
+                echo "Usage: claim-issue <ISSUE_NUMBER> [--repo owner/repo]" >&2
+                exit 2
+            fi
+            ;;
+    esac
+done
+
+if [ -z "$ISSUE_NUMBER" ]; then
+    echo "Usage: claim-issue <ISSUE_NUMBER> [--repo owner/repo]" >&2
+    echo "Error: ISSUE_NUMBER is required" >&2
+    exit 2
+fi
+
+if ! [[ "$ISSUE_NUMBER" =~ ^[0-9]+$ ]]; then
+    echo "Usage: claim-issue <ISSUE_NUMBER> [--repo owner/repo]" >&2
+    echo "Error: ISSUE_NUMBER must be a positive integer" >&2
+    exit 2
+fi
+
+# Build gh base args
+GH_REPO_ARGS=()
+if [ -n "$REPO_ARG" ]; then
+    GH_REPO_ARGS=("--repo" "$REPO_ARG")
+fi
+
+MAX_ATTEMPTS=3
+RETRY_DELAY=1
+
+# Attempt to claim with retry
+for attempt in $(seq 1 "$MAX_ATTEMPTS"); do
+    # First verify the issue is OPEN and unassigned
+    # Fetch state and assignee in one call
+    ISSUE_INFO=$(gh issue view "$ISSUE_NUMBER" \
+        --json state,assignees,title \
+        --jq '{state: .state, assignees: .assignees, title: .title}' \
+        "${GH_REPO_ARGS[@]}" 2>/dev/null) || {
+        echo "Error: could not fetch issue #$ISSUE_NUMBER" >&2
+        exit 1
+    }
+
+    STATE=$(echo "$ISSUE_INFO" | jq -r '.state')
+    if [ "$STATE" != "OPEN" ]; then
+        echo "Error: issue #$ISSUE_NUMBER is $STATE (not OPEN)" >&2
+        exit 1
+    fi
+
+    ASSIGNEE_COUNT=$(echo "$ISSUE_INFO" | jq -r '.assignees | length')
+    if [ "$ASSIGNEE_COUNT" -gt 0 ]; then
+        echo "Error: issue #$ISSUE_NUMBER is already assigned" >&2
+        exit 1
+    fi
+
+    TITLE=$(echo "$ISSUE_INFO" | jq -r '.title')
+
+    # Attempt to assign — this is the potentially racy step
+    if gh issue edit "$ISSUE_NUMBER" \
+        --add-assignee "@me" \
+        "${GH_REPO_ARGS[@]}" 2>/dev/null; then
+        echo "Claimed #$ISSUE_NUMBER: $TITLE"
+        exit 0
+    fi
+
+    # If this wasn't our last attempt, wait before retrying
+    if [ "$attempt" -lt "$MAX_ATTEMPTS" ]; then
+        sleep "$RETRY_DELAY"
+    fi
+done
+
+echo "Error: could not claim issue #$ISSUE_NUMBER after $MAX_ATTEMPTS attempts" >&2
+exit 1
