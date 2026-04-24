@@ -1,6 +1,7 @@
 ---
 name: check-tests
 description: Reviews test coverage, regression tests, corner cases, and acceptance criteria for a PDC loop iteration.
+mode: subagent
 tools:
   read: true
   glob: true

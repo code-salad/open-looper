@@ -1,6 +1,7 @@
 ---
 name: plan-completeness
 description: Checks plan covers all task requirements, Checker feedback, test descriptions, and corner cases.
+mode: subagent
 tools:
   read: true
   glob: true

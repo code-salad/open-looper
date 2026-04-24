@@ -1,6 +1,7 @@
 ---
 name: plan-feasibility
 description: Verifies plan references real files, APIs, and patterns. Checks runtime assumptions against actual codebase.
+mode: subagent
 tools:
   read: true
   glob: true

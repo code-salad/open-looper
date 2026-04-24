@@ -1,6 +1,7 @@
 ---
 name: simplifier
 description: Reviews and simplifies a bounded set of recently-changed files. Reduces redundancy, flattens nesting, improves naming, and removes dead code while strictly preserving behavior. Runs the test suite before returning control; reverts its own changes on failure.
+mode: subagent
 tools:
   read: true
   glob: true

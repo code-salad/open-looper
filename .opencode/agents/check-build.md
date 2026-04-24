@@ -1,6 +1,7 @@
 ---
 name: check-build
 description: Verifies typecheck and build pass for a PDC loop iteration.
+mode: subagent
 tools:
   read: true
   glob: true

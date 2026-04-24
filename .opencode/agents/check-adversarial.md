@@ -1,6 +1,7 @@
 ---
 name: check-adversarial
 description: Adversarial reviewer that tries to break the implementation. Hunts for edge cases, boundary bugs, and error-path failures the happy-path tests miss. Proposes concrete failing test cases.
+mode: subagent
 tools:
   read: true
   glob: true

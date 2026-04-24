@@ -1,6 +1,7 @@
 ---
 name: plan-scope
 description: Reviews plan scope for unnecessary changes, risky modifications, and over-engineering.
+mode: subagent
 tools:
   read: true
   glob: true
