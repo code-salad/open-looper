@@ -186,7 +186,7 @@ Summarize results from Phase 1c:
 ```bash
 if [ -d "tests/integration" ] && [ ! -f ".github/workflows/integration.yml" ]; then
     REPO_ROOT=$(git rev-parse --show-toplevel)
-    SCRIPTS_DIR="${REPO_ROOT}/.opencode/skills/looper/scripts"
+    SCRIPTS_DIR="${REPO_ROOT}/.opencode/scripts"
     if [ -x "$SCRIPTS_DIR/scaffold-integration-ci" ]; then
         "$SCRIPTS_DIR/scaffold-integration-ci"
     fi
@@ -399,7 +399,7 @@ If the `$WORKTREE_DIR` variable is set (indicating this PR was created from a lo
 
 ```bash
 REPO_ROOT=$(git rev-parse --show-toplevel)
-SCRIPTS_DIR="${REPO_ROOT}/.opencode/skills/looper/scripts"
+SCRIPTS_DIR="${REPO_ROOT}/.opencode/scripts"
 "$SCRIPTS_DIR/cleanup-worktree" --dir "$WORKTREE_DIR"
 ```
 

@@ -44,7 +44,7 @@ Before ANY side effect, verify the scripts directory is available:
 
 ```bash
 REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
-SCRIPTS_DIR="${REPO_ROOT}/.opencode/skills/looper/scripts"
+SCRIPTS_DIR="${REPO_ROOT}/.opencode/scripts"
 if [ ! -d "$SCRIPTS_DIR" ]; then
     echo "ERROR: looper scripts not found at $SCRIPTS_DIR" >&2
     exit 1
@@ -316,7 +316,7 @@ After PASS, the `create-github-pr` agent will handle squash-merge (if no DB migr
 | `ARGUMENTS` | User input | Task description or issue reference (e.g. `#5`). Empty means auto-select. |
 | `TASK_NAME` | Derived | Sanitized kebab-case name derived from `ARGUMENTS`. |
 | `WORKTREE_DIR` | `setup-worktree` | Absolute path to the isolated worktree for this task. |
-| `SCRIPTS_DIR` | Computed | Path to `.opencode/skills/looper/scripts`. |
+| `SCRIPTS_DIR` | Computed | Path to `.opencode/scripts`. |
 | `START_ITERATION` | `detect-resume` | Which iteration to resume from (1 if no prior work). Capped at `MAX_ITERATIONS`. |
 | `MAX_ITERATIONS` | `LOOPER_MAX_ITERATIONS` env or 10 | Upper bound on loop iterations. Override: `export LOOPER_MAX_ITERATIONS=20`. |
 | `LOOPER_DEV_PORT` | Derived | Isolated dev server port for this iteration. |
