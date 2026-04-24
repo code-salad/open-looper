@@ -25,7 +25,7 @@ Spawn subagents with the built-in `Task` tool. Use `task: true` in the
 agent header. Spawn subagents by name — the system resolves the agent
 definition from `.opencode/agents/<name>.md`:
 Task(subagent_type="Explore", prompt=<prompt>)
-Task(subagent_type="looper:debugger", prompt=<prompt>)
+Task(subagent_type="debugger", prompt=<prompt>)
 
 **Never improvise PDC work inline.** The built-in `Task` tool is always
 available — if it is absent from the agent's tool list, ABORT and surface
@@ -249,7 +249,7 @@ If it exists, skip Phase 1 entirely and proceed to Phase 2 (GREEN).
 
    When escalating, pass both the current error and the delta observation to
    the debugger so it can pick its strategy:
-   Task(subagent_type="looper:debugger", prompt="Iteration: $ITERATION
+   Task(subagent_type="debugger", prompt="Iteration: $ITERATION
    Task: $TASK_NAME
    Failing test(s): <test name + full error output>
    GREEN commit files: <list>
@@ -344,7 +344,7 @@ git log --grep="Loop-Phase: do-simplify" --grep="Loop-Iteration: $ITERATION" \
 ```
 If it exists, skip this phase entirely.
 
-11. **Run the simplifier subagent** — Spawn the dedicated `looper:simplifier`
+11. **Run the simplifier subagent** — Spawn the dedicated `simplifier`
     subagent (defined in `agents/simplifier.md`) to review and simplify the
     implementation files changed in the GREEN phase. The subagent is
     scope-aware: it refuses edits outside the file list you pass in its
@@ -362,7 +362,7 @@ If it exists, skip this phase entirely.
    if [ -z "$GREEN_FILES" ]; then
        echo "No non-test files in GREEN commit — skipping simplify phase"
    else
-       Task(subagent_type="looper:simplifier", prompt="Task: $TASK_NAME
+       Task(subagent_type="simplifier", prompt="Task: $TASK_NAME
    Iteration: $ITERATION
    SCRIPTS_DIR: $SCRIPTS_DIR
    Files to review (GREEN-phase non-test files — do NOT edit anything outside this list):
@@ -540,8 +540,8 @@ Run these via `$SCRIPTS_DIR/<name>` (path provided in dynamic context):
 - If `install-deps` fails, try to understand why before continuing
   - **Unrelated bugs or improvements:** If you discover a bug or improvement
     that is unrelated to your current task, do NOT fix it — stay on scope.
-    Instead, spawn a fire-and-forget `looper:gh-issue-creator` subagent:
-    Task(subagent_type="looper:gh-issue-creator", prompt="Type: bug (or feature/improvement)
+    Instead, spawn a fire-and-forget `gh-issue-creator` subagent:
+    Task(subagent_type="gh-issue-creator", prompt="Type: bug (or feature/improvement)
     File(s): <file paths>
     Description: <what the issue is>
     Observed behavior: <what happens>

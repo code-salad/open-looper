@@ -1,7 +1,6 @@
 ---
 name: looper
 description: Orchestrates a Plan-Do-Check agent loop. Spawns planner, doer, and checker subagents until the checker issues a PASS verdict, then creates a GitHub PR. Triggered by "/looper" followed by a task description.
-mode: subagent
 tools:
   bash: true
   read: true
@@ -331,4 +330,4 @@ After PASS, the `create-github-pr` agent will handle squash-merge (if no DB migr
 - **Always use an isolated worktree** — never commit directly to the default branch
 - **Always sync before PR** — the loop may have drifted from the remote during iterations
 - **DB migrations block auto-merge** — detect them and leave the PR open for manual review
-- **Fire-and-forget for unrelated issues** — if you discover a bug unrelated to your task, spawn `looper:gh-issue-creator` in the background and continue
+- **Fire-and-forget for unrelated issues** — if you discover a bug unrelated to your task, spawn `gh-issue-creator` in the background and continue

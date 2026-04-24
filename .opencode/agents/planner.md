@@ -25,7 +25,7 @@ Spawn subagents with the built-in `Task` tool. Use `task: true` in the
 agent header. Spawn subagents by name — the system resolves the agent
 definition from `.opencode/agents/<name>.md`:
 Task(subagent_type="Explore", prompt=<prompt>)
-Task(subagent_type="looper:debugger", prompt=<prompt>)
+Task(subagent_type="debugger", prompt=<prompt>)
 
 **Never improvise PDC work inline.** The built-in `Task` tool is always
 available — if it is absent from the agent's tool list, ABORT and surface
@@ -65,7 +65,7 @@ trail and is strictly worse than not running at all.
       a still-earlier iteration also failed on (i.e. the loop is stuck on the
       same problem), spawn the systematic debugger in parallel to root-cause
       it before you write the new plan:
-      Task(subagent_type="looper:debugger", prompt="<prior FAIL feedback +
+      Task(subagent_type="debugger", prompt="<prior FAIL feedback +
       failing test names + error output + files touched so far>")
       Use the debugger's Root Cause and Recommended Fix sections as the
       foundation for the new plan instead of guessing a different approach.
@@ -92,7 +92,7 @@ trail and is strictly worse than not running at all.
      spawn the systematic debugger to find the root cause before planning.**
      Pass it the reproduction steps, observed vs expected behavior, the exact
      error output, and the issue description:
-     Task(subagent_type="looper:debugger", prompt="Task: $TASK_NAME (iteration 1, bug fix)
+     Task(subagent_type="debugger", prompt="Task: $TASK_NAME (iteration 1, bug fix)
      Issue: <issue title + body>
      Reproduction: <steps from Track D>
      Observed: <what Track D actually saw>
@@ -230,24 +230,24 @@ trail and is strictly worse than not running at all.
 
    Run all three in parallel as separate tool calls in one message:
    ```
-   Task(subagent_type="looper:plan-feasibility", prompt="<context>")
-   Task(subagent_type="looper:plan-completeness", prompt="<context>")
-   Task(subagent_type="looper:plan-scope", prompt="<context>")
+   Task(subagent_type="plan-feasibility", prompt="<context>")
+   Task(subagent_type="plan-completeness", prompt="<context>")
+   Task(subagent_type="plan-scope", prompt="<context>")
    ```
 
    For `<context>`, pass a context prompt containing: task name, iteration number,
    task prompt, the draft plan text from step 4, and prior loop context
    (if iteration > 1, otherwise "First iteration — no prior context").
 
-   **Subagent 1 — Feasibility Reviewer** (`looper:plan-feasibility`):
+   **Subagent 1 — Feasibility Reviewer** (`plan-feasibility`):
    Verifies all referenced files, APIs, and patterns exist in the codebase.
    See `agents/plan-feasibility.md` for full instructions.
 
-   **Subagent 2 — Completeness Reviewer** (`looper:plan-completeness`):
+   **Subagent 2 — Completeness Reviewer** (`plan-completeness`):
    Checks plan covers all task requirements, Checker feedback, and test descriptions.
    See `agents/plan-completeness.md` for full instructions.
 
-   **Subagent 3 — Scope & Risk Reviewer** (`looper:plan-scope`):
+   **Subagent 3 — Scope & Risk Reviewer** (`plan-scope`):
    Reviews plan scope for unnecessary changes and over-engineering.
    See `agents/plan-scope.md` for full instructions.
 
@@ -317,8 +317,8 @@ The `$SCRIPTS_DIR` path is injected as a task variable in your dynamic context.
   Never use the project's default port.
 - **Unrelated bugs or improvements:** If you discover a bug, missing feature,
   or improvement that is unrelated to your current task, do NOT include it in
-  your plan. Instead, spawn a fire-and-forget `looper:gh-issue-creator` subagent:
-  Task(subagent_type="looper:gh-issue-creator", prompt="Type: bug (or feature/improvement)
+  your plan. Instead, spawn a fire-and-forget `gh-issue-creator` subagent:
+  Task(subagent_type="gh-issue-creator", prompt="Type: bug (or feature/improvement)
   File(s): <file paths>
   Description: <what the issue is>
   Observed behavior: <what happens>
