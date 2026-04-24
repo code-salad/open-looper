@@ -1,110 +1,141 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# claim-issue — Atomically claim a GitHub issue for the current user
+# claim-issue — TOCTOU-safe script to claim a GitHub issue
 #
-# Uses a check-then-assign pattern with retry to avoid TOCTOU race
-# conditions where another agent might claim the issue between our
-# check and assign.
-#
-# Usage: claim-issue <ISSUE_NUMBER> [--repo owner/repo]
-#   <ISSUE_NUMBER>  Number of the issue to claim (without #).
-#   --repo owner/repo  Target repo (default: current repo via gh context).
-#
-# Exit codes:
-#   0 = issue successfully claimed
-#   1 = could not claim (already assigned, not open, or retried out)
-#   2 = invalid arguments
-#
-# Stdout: On success, prints the claimed issue number and title:
-#   "Claimed #<N>: <title>"
+# Usage: claim-issue --issue N [--repo owner/repo]
+# Exit 0: claimed successfully (prints NUMBER=N to stdout)
+# Exit 1: already taken or blocked (prints reason to stderr)
+# Exit 2: usage error
+
+GH_REPO_ARGS=()
+LOCK_DIR="${LOCK_DIR:-/tmp}"
+
+# ------------------------------------------------------------------------
+# Argument parsing
+# ------------------------------------------------------------------------
 
 ISSUE_NUMBER=""
 REPO_ARG=""
 
-while [ $# -gt 0 ]; do
+while [[ $# -gt 0 ]]; do
     case "$1" in
+        --issue)
+            if [[ $# -lt 2 ]] || [[ -z "$2" ]]; then
+                echo "Usage: claim-issue --issue N [--repo owner/repo]" >&2
+                echo "Error: --issue requires a number" >&2
+                exit 2
+            fi
+            ISSUE_NUMBER="$2"
+            shift 2
+            ;;
         --repo)
-            if [ $# -lt 2 ]; then
-                echo "Usage: claim-issue <ISSUE_NUMBER> [--repo owner/repo]" >&2
-                echo "Error: --repo requires a value" >&2
+            if [[ $# -lt 2 ]] || [[ -z "$2" ]]; then
+                echo "Usage: claim-issue --issue N [--repo owner/repo]" >&2
+                echo "Error: --repo requires owner/repo" >&2
                 exit 2
             fi
             REPO_ARG="$2"
             shift 2
             ;;
         *)
-            if [ -z "$ISSUE_NUMBER" ]; then
-                ISSUE_NUMBER="$1"
-                shift
-            else
-                echo "Usage: claim-issue <ISSUE_NUMBER> [--repo owner/repo]" >&2
-                exit 2
-            fi
+            echo "Usage: claim-issue --issue N [--repo owner/repo]" >&2
+            exit 2
             ;;
     esac
 done
 
-if [ -z "$ISSUE_NUMBER" ]; then
-    echo "Usage: claim-issue <ISSUE_NUMBER> [--repo owner/repo]" >&2
-    echo "Error: ISSUE_NUMBER is required" >&2
+if [[ -z "$ISSUE_NUMBER" ]]; then
+    echo "Usage: claim-issue --issue N [--repo owner/repo]" >&2
+    echo "Error: --issue is required" >&2
     exit 2
 fi
 
-if ! [[ "$ISSUE_NUMBER" =~ ^[0-9]+$ ]]; then
-    echo "Usage: claim-issue <ISSUE_NUMBER> [--repo owner/repo]" >&2
-    echo "Error: ISSUE_NUMBER must be a positive integer" >&2
-    exit 2
-fi
-
-# Build gh base args
-GH_REPO_ARGS=()
-if [ -n "$REPO_ARG" ]; then
+if [[ -n "$REPO_ARG" ]]; then
     GH_REPO_ARGS=("--repo" "$REPO_ARG")
 fi
 
-MAX_ATTEMPTS=3
-RETRY_DELAY=1
+# ------------------------------------------------------------------------
+# Resolve owner/repo for lock file
+# ------------------------------------------------------------------------
 
-# Attempt to claim with retry
-for attempt in $(seq 1 "$MAX_ATTEMPTS"); do
-    # First verify the issue is OPEN and unassigned
-    # Fetch state and assignee in one call
-    ISSUE_INFO=$(gh issue view "$ISSUE_NUMBER" \
-        --json state,assignees,title \
-        --jq '{state: .state, assignees: .assignees, title: .title}' \
-        "${GH_REPO_ARGS[@]}" 2>/dev/null) || {
-        echo "Error: could not fetch issue #$ISSUE_NUMBER" >&2
-        exit 1
-    }
+if [[ -n "$REPO_ARG" ]]; then
+    OWNER_REPO="$REPO_ARG"
+else
+    OWNER_REPO=$(gh repo view --json owner,name --jq '.owner.login + "/" + .name' 2>/dev/null)
+fi
 
-    STATE=$(echo "$ISSUE_INFO" | jq -r '.state')
-    if [ "$STATE" != "OPEN" ]; then
-        echo "Error: issue #$ISSUE_NUMBER is $STATE (not OPEN)" >&2
-        exit 1
-    fi
+# Parse owner and repo from OWNER_REPO
+OWNER="${OWNER_REPO%%/*}"
+REPO="${OWNER_REPO#*/}"
 
-    ASSIGNEE_COUNT=$(echo "$ISSUE_INFO" | jq -r '.assignees | length')
-    if [ "$ASSIGNEE_COUNT" -gt 0 ]; then
-        echo "Error: issue #$ISSUE_NUMBER is already assigned" >&2
-        exit 1
-    fi
+# ------------------------------------------------------------------------
+# Lock file path
+# ------------------------------------------------------------------------
 
-    TITLE=$(echo "$ISSUE_INFO" | jq -r '.title')
+LOCK_FILE="${LOCK_DIR}/claim-issue-${OWNER}-${REPO}-${ISSUE_NUMBER}.lock"
 
-    # Attempt to assign — this is the potentially racy step
-    if gh issue edit "$ISSUE_NUMBER" \
-        --add-assignee "@me" \
-        "${GH_REPO_ARGS[@]}" 2>/dev/null; then
-        echo "Claimed #$ISSUE_NUMBER: $TITLE"
+# ------------------------------------------------------------------------
+# Acquire lock with timeout
+# ------------------------------------------------------------------------
+
+if ! command -v flock >/dev/null 2>&1; then
+    echo "Error: flock is required but not found" >&2
+    exit 1
+fi
+
+# Create the lock file directory if it doesn't exist (but don't create /tmp)
+if [[ "$LOCK_DIR" != "/tmp" ]] && [[ ! -d "$LOCK_DIR" ]]; then
+    mkdir -p "$LOCK_DIR"
+fi
+
+# Acquire exclusive lock with 10-second timeout
+exec 200>"$LOCK_FILE"
+if ! flock -w 10 200; then
+    echo "Could not acquire lock for issue #$ISSUE_NUMBER (timeout)" >&2
+    exit 1
+fi
+
+# Ensure lock file is removed on exit
+trap 'rm -f "$LOCK_FILE" 2>/dev/null || true' EXIT
+
+# ------------------------------------------------------------------------
+# Check current assignees
+# ------------------------------------------------------------------------
+
+ISSUE_JSON=$(gh issue view "$ISSUE_NUMBER" --json assignees "${GH_REPO_ARGS[@]}" 2>&1) || {
+    echo "Issue #$ISSUE_NUMBER not found" >&2
+    exit 1
+}
+
+CURRENT_USER=$(gh api user --jq '.login' 2>/dev/null) || CURRENT_USER=""
+
+# ------------------------------------------------------------------------
+# Check if already assigned to someone else
+# ------------------------------------------------------------------------
+
+ASSIGNEE_LOGIN=$(echo "$ISSUE_JSON" | jq -r '.assignees.nodes[0].login // empty' 2>/dev/null)
+
+if [[ -n "$ASSIGNEE_LOGIN" ]]; then
+    if [[ "$ASSIGNEE_LOGIN" == "$CURRENT_USER" ]]; then
+        # Already assigned to current user — idempotent success
+        echo "NUMBER=$ISSUE_NUMBER"
         exit 0
+    else
+        # Assigned to someone else
+        echo "Issue #$ISSUE_NUMBER is already assigned to @$ASSIGNEE_LOGIN" >&2
+        exit 1
     fi
+fi
 
-    # If this wasn't our last attempt, wait before retrying
-    if [ "$attempt" -lt "$MAX_ATTEMPTS" ]; then
-        sleep "$RETRY_DELAY"
-    fi
-done
+# ------------------------------------------------------------------------
+# Assign the issue to current user
+# ------------------------------------------------------------------------
 
-echo "Error: could not claim issue #$ISSUE_NUMBER after $MAX_ATTEMPTS attempts" >&2
-exit 1
+if ! gh issue edit "$ISSUE_NUMBER" --add-assignee "@me" "${GH_REPO_ARGS[@]}" 2>&1; then
+    echo "Failed to assign issue #$ISSUE_NUMBER" >&2
+    exit 1
+fi
+
+echo "NUMBER=$ISSUE_NUMBER"
+exit 0
