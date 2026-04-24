@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# install-deps — Install project dependencies
+# Usage: install-deps
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/_helpers.sh"
+
+STACK=$(load_stack)
+package_manager=$(echo "$STACK" | jq -r '.package_manager')
+
+case "$package_manager" in
+    pnpm)
+        pnpm install --frozen-lockfile 2>/dev/null || pnpm install
+        ;;
+    yarn)
+        yarn install --frozen-lockfile 2>/dev/null || yarn install
+        ;;
+    bun)
+        bun install --frozen-lockfile 2>/dev/null || bun install
+        ;;
+    npm)
+        npm ci 2>/dev/null || npm install
+        ;;
+    uv)
+        uv sync
+        ;;
+    poetry)
+        poetry install
+        ;;
+    pipenv)
+        pipenv install
+        ;;
+    pip)
+        # Use python -m pip to respect the active venv
+        if [ -f "requirements.txt" ]; then
+            python -m pip install -r requirements.txt
+        fi
+        if [ -f "requirements-dev.txt" ]; then
+            python -m pip install -r requirements-dev.txt
+        fi
+        if [ ! -f "requirements.txt" ] && [ ! -f "requirements-dev.txt" ]; then
+            python -m pip install -e .
+        fi
+        ;;
+    go-modules)
+        go mod download
+        ;;
+    cargo)
+        cargo fetch
+        ;;
+    nuget)
+        dotnet restore
+        ;;
+    none)
+        echo "No package manager detected." >&2
+        exit 1
+        ;;
+    *)
+        echo "Unsupported package manager: $package_manager" >&2
+        exit 1
+        ;;
+esac

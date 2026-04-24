@@ -1,0 +1,348 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# git-loop-context — Read loop history from git log
+# Usage: git-loop-context --task <name> --iteration <N> [--role planner|doer|checker]
+# Outputs structured markdown with progressive compression:
+#   - Last iteration (N-1):  full plan + changes + file stats + verdict
+#   - Recent iterations (N-2, N-3): plan first line + verdict action items
+#   - Older iterations: one-line summary (verdict + first line)
+#
+# --role planner  : emit only plan body + verdict body per iteration
+# --role doer     : emit only one-line summary per iteration (### Iteration N — VERDICT)
+# --role checker  : emit only verdict body per iteration
+# --role ""       : same as no --role (legacy full output)
+
+TASK=""
+ITERATION=""
+ROLE=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --task) TASK="$2"; shift 2 ;;
+        --iteration) ITERATION="$2"; shift 2 ;;
+        --role) ROLE="$2"; shift 2 ;;
+        *) echo "Unknown option: $1" >&2; exit 1 ;;
+    esac
+done
+
+if [ -z "$TASK" ] || [ -z "$ITERATION" ]; then
+    echo "Usage: git-loop-context --task <name> --iteration <N> [--role planner|doer|checker]" >&2
+    exit 1
+fi
+
+# Validate role if non-empty
+if [ -n "$ROLE" ]; then
+    case "$ROLE" in
+        planner|doer|checker) ;;
+        *)
+            echo "Unknown role: $ROLE (must be planner, doer, or checker)" >&2
+            exit 1
+            ;;
+    esac
+fi
+
+echo "## Loop Context: ${TASK}, Iteration ${ITERATION}"
+echo ""
+
+# If iteration 1, note that there's no prior context and exit early
+if [ "$ITERATION" -eq 1 ]; then
+    echo "This is the first iteration. No prior context available."
+    echo ""
+    exit 0
+fi
+
+# Fetch all loop commits in a single git log call
+# Each commit is delimited by __COMMIT__ markers with hash, phase, iteration, and body
+ALL_LOG=$(git log --grep="Loop-Iteration:" --format="__COMMIT__%H%n%B__END__" 2>/dev/null || true)
+
+# Helper: extract commit body for a given phase and iteration
+_extract_body() {
+    local phase="$1" iter="$2"
+    echo "$ALL_LOG" | awk -v phase="$phase" -v iter="$iter" '
+        /^__COMMIT__/ { hash=substr($0,11); body=""; in_commit=1; is_phase=0; is_iter=0; next }
+        /^__END__$/ {
+            if (in_commit && is_phase && is_iter) print body
+            in_commit=0; next
+        }
+        in_commit {
+            if ($0 ~ "^Loop-Phase: " phase "$") is_phase=1
+            if ($0 ~ "^Loop-Iteration: " iter "$") is_iter=1
+            body = (body == "" ? $0 : body "\n" $0)
+        }
+    '
+}
+
+# Helper: extract commit hash for a given phase and iteration
+_extract_hash() {
+    local phase="$1" iter="$2"
+    echo "$ALL_LOG" | awk -v phase="$phase" -v iter="$iter" '
+        /^__COMMIT__/ { hash=substr($0,11); in_commit=1; is_phase=0; is_iter=0; next }
+        /^__END__$/ {
+            if (in_commit && is_phase && is_iter) print hash
+            in_commit=0; next
+        }
+        in_commit {
+            if ($0 ~ "^Loop-Phase: " phase "$") is_phase=1
+            if ($0 ~ "^Loop-Iteration: " iter "$") is_iter=1
+        }
+    '
+}
+
+# Helper: extract doer commit hash (legacy do phase)
+_extract_doer_hash() {
+    _extract_hash "do" "$1"
+}
+
+# Helper: strip loop trailers from body text
+_strip_trailers() {
+    sed '/^Loop-Phase:/d; /^Loop-Iteration:/d; /^Loop-Verdict:/d'
+}
+
+# Helper: extract first non-empty content line (skip blank lines and commit subject)
+_first_line() {
+    # Skip the commit subject (first line) and any blank lines, get first content line
+    sed '/^$/d' | head -1
+}
+
+# Helper: extract action items section from verdict
+_extract_action_items() {
+    awk '/^## Action items/,/^## [^A]|^$/' | head -20
+}
+
+# Determine detail level for each iteration using verdict-adaptive compression:
+# - N-1 (last iteration): always full
+# - PASS iterations (any age except N-1): always minimal
+# - FAIL iterations within N-4: medium
+# - FAIL iterations older than N-4 (and not N-1): minimal
+LAST=$((ITERATION - 1))
+FAIL_MEDIUM_START=$((ITERATION - 4))
+[ "$FAIL_MEDIUM_START" -lt 1 ] && FAIL_MEDIUM_START=1
+
+for (( i=1; i<ITERATION; i++ )); do
+    plan_body=$(_extract_body "plan" "$i")
+    verdict_body=$(_extract_body "check" "$i")
+    verdict=$(echo "$verdict_body" | grep -oE 'Loop-Verdict: (PASS|FAIL)' | head -1 | sed 's/Loop-Verdict: //' || echo "UNKNOWN")
+
+    # --- Role-scoped output (when --role is set) ---
+    if [ -n "$ROLE" ]; then
+        case "$ROLE" in
+            planner)
+                # Plan body + verdict body; skip all do-* commits
+                echo "### Iteration ${i}"
+                echo ""
+                if [ -n "$plan_body" ]; then
+                    echo "#### Plan"
+                    echo ""
+                    echo "$plan_body" | _strip_trailers
+                    echo ""
+                fi
+                if [ -n "$verdict_body" ]; then
+                    echo "#### Verdict: ${verdict}"
+                    echo ""
+                    echo "$verdict_body" | _strip_trailers
+                    echo ""
+                fi
+                echo "---"
+                echo ""
+                ;;
+            doer)
+                # One-line summary per prior iteration; no bodies
+                echo "### Iteration ${i} — ${verdict}"
+                echo ""
+                ;;
+            checker)
+                # Verdict body only; skip plan and do-* commits
+                echo "### Iteration ${i}"
+                echo ""
+                if [ -n "$verdict_body" ]; then
+                    echo "#### Verdict: ${verdict}"
+                    echo ""
+                    echo "$verdict_body" | _strip_trailers
+                    echo ""
+                fi
+                echo "---"
+                echo ""
+                ;;
+        esac
+        continue
+    fi
+
+    # Calculate detail level (verdict-adaptive) — legacy full output
+    if [ "$i" -eq "$LAST" ]; then
+        detail="full"
+    elif [ "$verdict" = "PASS" ]; then
+        detail="minimal"
+    elif [ "$verdict" = "FAIL" ] && [ "$i" -ge "$FAIL_MEDIUM_START" ]; then
+        detail="medium"
+    else
+        detail="minimal"
+    fi
+
+    # --- MINIMAL: one-line summary ---
+    if [ "$detail" = "minimal" ]; then
+        plan_summary=""
+        if [ -n "$plan_body" ]; then
+            plan_summary=$(echo "$plan_body" | _strip_trailers | _first_line)
+        fi
+        echo "### Iteration ${i} — ${verdict}"
+        if [ -n "$plan_summary" ]; then
+            echo "Plan: ${plan_summary}"
+        fi
+        echo ""
+        continue
+    fi
+
+    echo "### Iteration ${i}"
+    echo ""
+
+    # --- MEDIUM: plan first line + verdict action items ---
+    if [ "$detail" = "medium" ]; then
+        if [ -n "$plan_body" ]; then
+            plan_summary=$(echo "$plan_body" | _strip_trailers | _first_line)
+            echo "#### Plan"
+            echo "**Goal:** ${plan_summary}"
+            echo ""
+        fi
+
+        # TDD: check for red/green commits or fallback to legacy do
+        if [ -n "$(_extract_body "do-red" "$i")" ] || [ -n "$(_extract_body "do-green" "$i")" ]; then
+            echo "#### TDD: RED then GREEN"
+            echo ""
+        else
+            doer_hash=$(_extract_doer_hash "$i")
+            if [ -n "$doer_hash" ]; then
+                echo "#### Files changed"
+                echo '```'
+                git show --stat --format="" "$doer_hash" 2>/dev/null || true
+                echo '```'
+                echo ""
+            fi
+        fi
+
+        if [ -n "$verdict_body" ]; then
+            echo "#### Verdict: ${verdict}"
+            echo ""
+            # Include action items section only
+            action_items=$(echo "$verdict_body" | _strip_trailers | _extract_action_items)
+            if [ -n "$action_items" ]; then
+                echo "$action_items"
+            else
+                # Fallback: show first 5 lines of verdict
+                echo "$verdict_body" | _strip_trailers | head -5
+            fi
+            echo ""
+        fi
+
+        echo "---"
+        echo ""
+        continue
+    fi
+
+    # --- FULL: everything (last iteration only) ---
+    if [ -n "$plan_body" ]; then
+        echo "#### Plan"
+        echo ""
+        echo "$plan_body" | _strip_trailers
+        echo ""
+    fi
+
+    # TDD: check for do-red and do-green commits first
+    red_body=$(_extract_body "do-red" "$i")
+    green_body=$(_extract_body "do-green" "$i")
+
+    if [ -n "$red_body" ] || [ -n "$green_body" ]; then
+        if [ -n "$red_body" ]; then
+            echo "#### RED (Tests)"
+            echo ""
+            echo "$red_body" | _strip_trailers
+            echo ""
+            red_hash=$(_extract_hash "do-red" "$i")
+            if [ -n "$red_hash" ]; then
+                echo "**Files changed:**"
+                echo '```'
+                git show --stat --format="" "$red_hash" 2>/dev/null || true
+                echo '```'
+                echo ""
+            fi
+        fi
+        if [ -n "$green_body" ]; then
+            echo "#### GREEN (Implementation)"
+            echo ""
+            echo "$green_body" | _strip_trailers
+            echo ""
+            green_hash=$(_extract_hash "do-green" "$i")
+            if [ -n "$green_hash" ]; then
+                echo "**Files changed:**"
+                echo '```'
+                git show --stat --format="" "$green_hash" 2>/dev/null || true
+                echo '```'
+                echo ""
+            fi
+        elif [ -n "$red_body" ]; then
+            echo "#### GREEN (Implementation) — not committed"
+            echo ""
+        fi
+
+        # Simplify (optional phase)
+        simplify_body=$(_extract_body "do-simplify" "$i")
+        if [ -n "$simplify_body" ]; then
+            echo "#### SIMPLIFY (Code Refinement)"
+            echo ""
+            echo "$simplify_body" | _strip_trailers
+            echo ""
+            simplify_hash=$(_extract_hash "do-simplify" "$i")
+            if [ -n "$simplify_hash" ]; then
+                echo "**Files changed:**"
+                echo '```'
+                git show --stat --format="" "$simplify_hash" 2>/dev/null || true
+                echo '```'
+                echo ""
+            fi
+        fi
+
+        # Integration tests (optional phase)
+        integration_body=$(_extract_body "do-integration" "$i")
+        if [ -n "$integration_body" ]; then
+            echo "#### INTEGRATION (Integration Tests)"
+            echo ""
+            echo "$integration_body" | _strip_trailers
+            echo ""
+            integration_hash=$(_extract_hash "do-integration" "$i")
+            if [ -n "$integration_hash" ]; then
+                echo "**Files changed:**"
+                echo '```'
+                git show --stat --format="" "$integration_hash" 2>/dev/null || true
+                echo '```'
+                echo ""
+            fi
+        fi
+    else
+        # Fallback: legacy single do commit
+        doer_info_hash=$(_extract_doer_hash "$i")
+        doer_body=$(_extract_body "do" "$i")
+        if [ -n "$doer_body" ]; then
+            echo "#### Changes"
+            echo ""
+            echo "$doer_body" | _strip_trailers
+            echo ""
+            if [ -n "$doer_info_hash" ]; then
+                echo "**Files changed:**"
+                echo '```'
+                git show --stat --format="" "$doer_info_hash" 2>/dev/null || true
+                echo '```'
+                echo ""
+            fi
+        fi
+    fi
+
+    if [ -n "$verdict_body" ]; then
+        echo "#### Verdict: ${verdict}"
+        echo ""
+        echo "$verdict_body" | _strip_trailers
+        echo ""
+    fi
+
+    echo "---"
+    echo ""
+done

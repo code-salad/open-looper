@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# run-format — Run the project's code formatter
+# Usage: run-format [--fix]
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/_helpers.sh"
+
+FIX=false
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --fix) FIX=true; shift ;;
+        *) echo "Unknown option: $1" >&2; exit 1 ;;
+    esac
+done
+
+STACK=$(load_stack)
+formatter=$(echo "$STACK" | jq -r '.formatter')
+# shellcheck disable=SC2034
+package_manager=$(echo "$STACK" | jq -r '.package_manager')
+
+case "$formatter" in
+    prettier)
+        if [ "$FIX" = true ]; then
+            args=("--write" ".")
+        else
+            args=("--check" ".")
+        fi
+        if has_pkg_script format; then
+            if [ "$FIX" = true ]; then
+                run_pkg_script format --write .
+            else
+                run_pkg_script format --check .
+            fi
+        else
+            npx prettier "${args[@]}"
+        fi
+        ;;
+    biome)
+        args=("format" ".")
+        [ "$FIX" = true ] && args+=("--write")
+        npx biome "${args[@]}"
+        ;;
+    black)
+        args=(".")
+        [ "$FIX" = false ] && args+=("--check")
+        run_python_tool black "${args[@]}"
+        ;;
+    ruff)
+        args=("format" ".")
+        [ "$FIX" = false ] && args+=("--check")
+        run_python_tool ruff "${args[@]}"
+        ;;
+    gofmt)
+        if [ "$FIX" = true ]; then
+            gofmt -w .
+        else
+            diff=$(gofmt -l .)
+            if [ -n "$diff" ]; then
+                echo "Files need formatting:" >&2
+                echo "$diff" >&2
+                exit 1
+            fi
+            echo "All files formatted correctly."
+        fi
+        ;;
+    rustfmt)
+        args=()
+        [ "$FIX" = false ] && args+=("--check")
+        cargo fmt "${args[@]}"
+        ;;
+    dotnet-format)
+        if [ "$FIX" = true ]; then
+            dotnet format
+        else
+            dotnet format --verify-no-changes
+        fi
+        ;;
+    none)
+        echo "No formatter detected." >&2
+        exit 1
+        ;;
+    *)
+        echo "Unsupported formatter: $formatter" >&2
+        exit 1
+        ;;
+esac

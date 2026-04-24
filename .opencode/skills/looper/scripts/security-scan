@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# security-scan — Run basic security checks
+# Usage: security-scan
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/_helpers.sh"
+
+STACK=$(load_stack)
+package_manager=$(echo "$STACK" | jq -r '.package_manager')
+language=$(echo "$STACK" | jq -r '.language')
+
+echo "[security-scan] Running security checks for language: $language"
+
+case "$language" in
+    typescript|javascript)
+        case "$package_manager" in
+            pnpm)
+                pnpm audit --prod 2>/dev/null || echo "[security-scan] WARNING: pnpm audit found issues (non-blocking)" >&2
+                ;;
+            yarn)
+                # yarn audit (v1) does not support --groups; omit the flag
+                yarn audit 2>/dev/null || echo "[security-scan] WARNING: yarn audit found issues (non-blocking)" >&2
+                ;;
+            bun)
+                # bun has no built-in audit command; fall back to npm audit if lockfile exists
+                if [ -f "package-lock.json" ]; then
+                    npm audit --production 2>/dev/null || echo "[security-scan] WARNING: npm audit found issues (non-blocking)" >&2
+                else
+                    echo "[security-scan] INFO: No audit tool available for bun projects without package-lock.json" >&2
+                fi
+                ;;
+            npm|*)
+                npm audit --production 2>/dev/null || echo "[security-scan] WARNING: npm audit found issues (non-blocking)" >&2
+                ;;
+        esac
+        ;;
+    python)
+        if command -v pip-audit &>/dev/null; then
+            pip-audit || echo "[security-scan] WARNING: pip-audit found issues (non-blocking)" >&2
+        elif [ "$package_manager" = "uv" ]; then
+            uv run pip-audit 2>/dev/null || echo "[security-scan] WARNING: pip-audit found issues (non-blocking)" >&2
+        else
+            echo "[security-scan] INFO: pip-audit not available. Install with: pip install pip-audit" >&2
+        fi
+        ;;
+    go)
+        if command -v govulncheck &>/dev/null; then
+            govulncheck ./... || echo "[security-scan] WARNING: govulncheck found issues (non-blocking)" >&2
+        else
+            echo "[security-scan] INFO: govulncheck not installed. Install: go install golang.org/x/vuln/cmd/govulncheck@latest" >&2
+        fi
+        ;;
+    rust)
+        if command -v cargo-audit &>/dev/null; then
+            cargo audit || echo "[security-scan] WARNING: cargo audit found issues (non-blocking)" >&2
+        else
+            echo "[security-scan] INFO: cargo-audit not installed. Install: cargo install cargo-audit" >&2
+        fi
+        ;;
+    csharp|fsharp)
+        dotnet list package --vulnerable 2>/dev/null || echo "[security-scan] WARNING: vulnerable packages found (non-blocking)" >&2
+        ;;
+    *)
+        echo "[security-scan] INFO: No security scanner available for language: $language" >&2
+        ;;
+esac
+
+# Security scan is always non-blocking — issues are warnings, not hard failures
+exit 0
