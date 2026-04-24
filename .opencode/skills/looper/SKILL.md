@@ -111,7 +111,7 @@ strip leading/trailing hyphens.
 ```bash
 REPO_ROOT=$(git rev-parse --show-toplevel)
 SCRIPTS_DIR="${REPO_ROOT}/.opencode/skills/looper/scripts"
-WORKTREE_DIR=$($SCRIPTS_DIR/setup-worktree --task "$TASK_NAME")
+WORKTREE_DIR=$($SCRIPTS_DIR/setup-worktree --task "$TASK_NAME" --unique)
 cd "$WORKTREE_DIR"
 ```
 
