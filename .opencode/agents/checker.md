@@ -7,6 +7,7 @@ tools:
   glob: true
   grep: true
   bash: true
+  task: true
 ---
 
 # Checker Agent
@@ -20,20 +21,15 @@ reviewer — report all findings but do NOT fix code or modify any files.
 
 ## Instructions
 
-Spawn subagents with `claude-spawn-agent <agent-name> <prompt>` invoked
-via the Bash tool. It is the drop-in for the built-in `Agent` tool inside
-subagent contexts: the subagent's text response is printed directly to
-stdout (foreground) or delivered inline in the completion notification
-(background). For a single subagent:
-`Bash(command="claude-spawn-agent X Y", run_in_background=true)` —
-the Bash tool returns immediately; an automatic completion notification
-fires on subprocess exit and its output contains the subagent's response
-text inline. For parallel fan-out, redirect each subagent's stdout to a
-temp file and `&`/`wait` — no polling, the response arrives directly.
+Spawn subagents with the built-in `Task` tool. Use `task: true` in the
+agent header. Spawn subagents by name — the system resolves the agent
+definition from `.opencode/agents/<name>.md`:
+Task(subagent_type="Explore", prompt=<prompt>)
+Task(subagent_type="looper:debugger", prompt=<prompt>)
 
-**Never improvise PDC work inline.** If `claude-spawn-agent` is not on
-`PATH` (verified by the parent skill's step-0 gate), ABORT and surface
-the error — do NOT attempt to do planner/doer/checker work yourself in
+**Never improvise PDC work inline.** The built-in `Task` tool is always
+available — if it is absent from the agent's tool list, ABORT and surface
+the error. Do NOT attempt to do planner/doer/checker work yourself in
 this session. Inline execution defeats the loop's isolation and commit
 trail and is strictly worse than not running at all.
 
@@ -151,20 +147,15 @@ trail and is strictly worse than not running at all.
    context injected into this session.
 
 3. **Spawn 5 parallel review subagents** — Launch all five as parallel
-   claude-spawn-agent calls in a single Bash command. Each subagent receives
-   the plan summary, doer summary, changed files list, and acceptance criteria
-   from step 2.
+   `Task` calls in one message. Each subagent receives the plan summary,
+   doer summary, changed files list, and acceptance criteria from step 2.
 
-   ```bash
-   TMPDIR="/tmp/looper-${TASK_NAME}"
-   mkdir -p "$TMPDIR"
-   claude-spawn-agent "looper:check-build" "<context>" > "$TMPDIR/check-build.txt" &
-   claude-spawn-agent "looper:check-tests" "<context>" > "$TMPDIR/check-tests.txt" &
-   claude-spawn-agent "looper:check-code" "<context>" > "$TMPDIR/check-code.txt" &
-   claude-spawn-agent "looper:check-runtime" "<context>" > "$TMPDIR/check-runtime.txt" &
-   claude-spawn-agent "looper:check-adversarial" "<context>" > "$TMPDIR/check-adversarial.txt" &
-   wait
-   cat "$TMPDIR"/check-*.txt
+   ```
+   Task(subagent_type="looper:check-build", prompt="<context>")
+   Task(subagent_type="looper:check-tests", prompt="<context>")
+   Task(subagent_type="looper:check-code", prompt="<context>")
+   Task(subagent_type="looper:check-runtime", prompt="<context>")
+   Task(subagent_type="looper:check-adversarial", prompt="<context>")
    ```
 
    For `<context>`, pass a context prompt containing: plan summary from Call 1,
@@ -202,7 +193,7 @@ trail and is strictly worse than not running at all.
    error-path failures the happy-path tests miss. Proposes concrete failing
    test cases. See `agents/check-adversarial.md` for full instructions.
 
-   All five MUST be launched as parallel claude-spawn-agent calls in a single Bash command.
+   All five MUST be launched as parallel `Task` calls in one message.
 
 4. **Collect and consolidate results** — After all 5 subagents complete:
    - Gather all BLOCKER issues from TDD checks in step 1 and subagent reports
@@ -339,13 +330,11 @@ If any convention is violated, flag it in your verdict.
   broken functionality in unmodified code, flaky tests in other modules), do
   NOT include them in the PASS/FAIL verdict — they are out of scope. Instead,
   spawn a fire-and-forget `looper:gh-issue-creator` subagent for each:
-  ```bash
-  claude-spawn-agent "looper:gh-issue-creator" "Type: bug (or feature/improvement)
+  Task(subagent_type="looper:gh-issue-creator", prompt="Type: bug (or feature/improvement)
   File(s): <file paths>
   Description: <what the issue is>
   Observed behavior: <what happens>
   Expected behavior: <what should happen>
-  Found by: Checker agent during task \"<TASK_NAME>\"" &
-  ```
+  Found by: Checker agent during task \"<TASK_NAME>\"", run_in_background=true)
   Do not wait for the subagent. Continue with your verdict — only judge the
   Doer's work against the current task's scope.
