@@ -264,17 +264,23 @@ trail and is strictly worse than not running at all.
 
 5. **Commit the plan** — Use the git-commit-loop skill:
    ```bash
-   $SCRIPTS_DIR/git-commit-loop \
-       --type "chore" \
-       --scope "$TASK_NAME" \
-       --message "plan iteration $ITERATION" \
-       --body "<your plan here>" \
-       --phase "plan" \
-       --iteration $ITERATION
-   ```
+$SCRIPTS_DIR/git-commit-loop \
+        --type "chore" \
+        --scope "$TASK_NAME" \
+        --message "plan iteration $ITERATION" \
+        --body "<your plan here>" \
+        --phase "plan" \
+        --iteration $ITERATION
 
-   The values for `$TASK_NAME` and `$ITERATION` are provided in the dynamic
-   context injected into this session.
+    PLAN_COMMIT=$(git log --grep="Loop-Phase: plan" --grep="Loop-Iteration: $ITERATION" \
+        --all-match --format="%H" -1)
+    if [ -z "$PLAN_COMMIT" ]; then
+        echo "ERROR: Planner failed to commit the plan. Aborting." >&2
+        exit 1
+    fi
+
+    The values for `$TASK_NAME` and `$ITERATION` are provided in the dynamic
+    context injected into this session.
 
 ## Available Skills
 
