@@ -13,7 +13,7 @@ load 'helpers.bash'
   run $SCRIPTS_DIR/setup-worktree --task test-unique --unique
   echo "First run status: $status, output: $output"
   [ "$status" -eq 0 ]
-  FIRST_PATH="$output"
+  FIRST_PATH=$(echo "$output" | tail -1)
 
   # Verify path contains expected pattern: .worktrees/test-unique-<TS>-<UUID>
   echo "First path: $FIRST_PATH"
@@ -23,7 +23,7 @@ load 'helpers.bash'
   run $SCRIPTS_DIR/setup-worktree --task test-unique --unique
   echo "Second run status: $status, output: $output"
   [ "$status" -eq 0 ]
-  SECOND_PATH="$output"
+  SECOND_PATH=$(echo "$output" | tail -1)
   echo "Second path: $SECOND_PATH"
 
   [[ "$SECOND_PATH" =~ \.worktrees/test-unique-[0-9]{8}-[0-9]{6}-[a-f0-9]{8}$ ]]
@@ -40,7 +40,7 @@ load 'helpers.bash'
   run $SCRIPTS_DIR/setup-worktree --task test-resume
   echo "First run status: $status, output: $output"
   [ "$status" -eq 0 ]
-  FIRST_PATH="$output"
+  FIRST_PATH=$(echo "$output" | tail -1)
   echo "First path: $FIRST_PATH"
 
   # Must be a simple path without timestamp/uuid
@@ -50,7 +50,7 @@ load 'helpers.bash'
   run $SCRIPTS_DIR/setup-worktree --task test-resume
   echo "Second run status: $status, output: $output"
   [ "$status" -eq 0 ]
-  SECOND_PATH="$output"
+  SECOND_PATH=$(echo "$output" | tail -1)
   echo "Second path: $SECOND_PATH"
 
   [ "$FIRST_PATH" == "$SECOND_PATH" ]
@@ -60,7 +60,7 @@ load 'helpers.bash'
 @test "setup-worktree --unique creates valid git worktree" {
   cd "$FIXTURE_REPO"
 
-  WORKTREE_DIR=$($SCRIPTS_DIR/setup-worktree --task test-valid-worktree --unique)
+  WORKTREE_DIR=$($SCRIPTS_DIR/setup-worktree --task test-valid-worktree --unique | tail -1)
   echo "Worktree dir: $WORKTREE_DIR"
 
   # Must be registered with git worktree list
@@ -69,10 +69,10 @@ load 'helpers.bash'
   echo "$output"
   [[ "$output" =~ $WORKTREE_DIR ]]
 
-  # Must be on a loop/ branch
+  # Must be on a loop/ branch (unique mode uses loop/<task>-<UUID> branch)
   run git -C "$WORKTREE_DIR" branch --show-current
   echo "Current branch: $output"
-  [ "$output" == "loop/test-valid-worktree" ]
+  [[ "$output" =~ ^loop/test-valid-worktree-[a-f0-9]{8}$ ]]
 
   # Must have the expected commits from origin
   run git -C "$WORKTREE_DIR" log --oneline -3
@@ -84,16 +84,17 @@ load 'helpers.bash'
 @test "setup-worktree falls back when uuidgen is missing" {
   cd "$FIXTURE_REPO"
 
-  # Save original path and temporarily move uuidgen out of PATH
-  local ORIGINAL_UUIDGEN=""
+  # Save original uuidgen path if it exists
+  local ORIGINAL_PATH="$PATH"
   if command -v uuidgen &>/dev/null; then
-    ORIGINAL_UUIDGEN=$(command -v uuidgen)
-    local UUIDGEN_DIR=$(dirname "$ORIGINAL_UUIDGEN")
+    local UUIDGEN_PATH=$(command -v uuidgen)
+    local UUIDGEN_DIR=$(dirname "$UUIDGEN_PATH")
     export PATH="${PATH//$UUIDGEN_DIR/}"
   fi
 
   run $SCRIPTS_DIR/setup-worktree --task test-fallback --unique
-  echo "Run with restricted PATH: status=$status, output=$output"
   [ "$status" -eq 0 ]
+  echo "Run with restricted PATH: status=$status, output=$output"
+  export PATH="$ORIGINAL_PATH"
   [[ "$output" =~ \.worktrees/test-fallback-[0-9]{8}-[0-9]{6}-[a-f0-9]{8}$ ]]
 }

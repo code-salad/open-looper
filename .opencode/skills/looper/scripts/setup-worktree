@@ -11,10 +11,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/_helpers.sh"
 
 TASK=""
+UNIQUE=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --task) TASK="$2"; shift 2 ;;
+        --unique) UNIQUE="yes"; shift ;;
         *) echo "Unknown option: $1" >&2; exit 1 ;;
     esac
 done
@@ -42,6 +44,20 @@ fi
 
 REPO_ROOT=$(git rev-parse --show-toplevel)
 WORKTREE_DIR="$REPO_ROOT/.worktrees/$TASK"
+BRANCH="loop/$TASK"
+
+# If --unique, append timestamp and short UUID to isolate each run
+if [ "$UNIQUE" = "yes" ]; then
+    TS=$(date +%Y%m%d-%H%M%S)
+    # Fallback chain: uuidgen -> /proc/sys/kernel/random/uuid -> openssl rand -hex 4
+    UUID=$(uuidgen 2>/dev/null | head -c 8 \
+        || cat /proc/sys/kernel/random/uuid 2>/dev/null | head -c 8 \
+        || openssl rand -hex 4 2>/dev/null \
+        || printf "%08x" "$RANDOM$(date +%s%N)")
+    WORKTREE_DIR="$WORKTREE_DIR-$TS-$UUID"
+    # In unique mode, also use a unique branch to allow multiple worktrees
+    BRANCH="loop/$TASK-$UUID"
+fi
 
 # Ensure .worktrees is gitignored
 GITIGNORE="$REPO_ROOT/.gitignore"
@@ -77,10 +93,11 @@ if git remote get-url origin >/dev/null 2>&1; then
 fi
 
 # Create or reuse worktree
-BRANCH="loop/$TASK"
 if [ -d "$WORKTREE_DIR" ]; then
     echo "[setup-worktree] Worktree already exists, resuming" >&2
 elif git show-ref --quiet "refs/heads/$BRANCH"; then
+    # Branch exists but worktree doesn't (unique mode or fresh run).
+    # git worktree can share a branch across multiple worktrees since git 2.6+
     git worktree add "$WORKTREE_DIR" "$BRANCH" >/dev/null 2>&1
     echo "[setup-worktree] Created worktree at $WORKTREE_DIR (existing branch $BRANCH)" >&2
 elif [ -n "$DEFAULT_REMOTE_BRANCH" ] && git show-ref --quiet "refs/remotes/origin/$DEFAULT_REMOTE_BRANCH"; then
