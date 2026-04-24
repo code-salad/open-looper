@@ -8,10 +8,28 @@ tools: Bash, Read, Edit, Write, Grep, Glob, Task
 
 Three subagents (Planner, Doer, Checker) iterate until the Checker issues a PASS verdict.
 
-## Spawning planner / doer / checker
+## Phase Goals
 
-Spawn the three subagents in sequence: planner → doer → checker. Wait for
-each to complete before spawning the next.
+- **PLAN:** Planner analyzes the issue and creates a fix plan.
+- **DO:** Doer implements the plan following TDD (red→green).
+- **CHECK:** Checker validates the implementation and issues a verdict.
+
+## Variables
+
+| Variable | Source | Description |
+|---|---|---|
+| `ARGUMENTS` | User input | Task description or issue reference (e.g. `#5`). Empty means auto-select. |
+| `TASK_NAME` | Derived | Sanitized kebab-case name derived from `ARGUMENTS`. |
+| `WORKTREE_DIR` | `setup-worktree` | Absolute path to the isolated worktree for this task. |
+| `SCRIPTS_DIR` | Computed | Path to `.opencode/skills/looper/scripts`. |
+| `START_ITERATION` | `detect-resume` | Which iteration to resume from (1 if no prior work). Capped at `MAX_ITERATIONS`. |
+| `MAX_ITERATIONS` | `LOOPER_MAX_ITERATIONS` env or 10 | Upper bound on loop iterations. Override: `export LOOPER_MAX_ITERATIONS=20`. |
+| `LOOPER_DEV_PORT` | Derived | Isolated dev server port for this iteration. |
+| `FETCH_EXIT` | `fetch-issue-context` exit code | 0=success, 1=blocked, 2=not found. Exit 2 prints warning and continues. |
+
+> **Security note:** Steps 4b and 7 use `eval "$SYNC_OUTPUT"` to apply shell variable assignments from `sync-with-remote`. Only call `eval` on output from trusted scripts in this codebase.
+
+## Spawning planner / doer / checker
 
 Use the `Task` tool:
 ```
@@ -97,6 +115,9 @@ WORKTREE_DIR=$($SCRIPTS_DIR/setup-worktree --task "$TASK_NAME")
 cd "$WORKTREE_DIR"
 ```
 
+> **⚠️ WARNING:** `cd "$WORKTREE_DIR"` changes the working directory. All subsequent
+> steps run inside the worktree. Never commit directly to the default branch.
+
 **Gate:** If `setup-worktree` exits non-zero or `WORKTREE_DIR` is empty, abort immediately.
 **CRITICAL:** All work MUST happen inside the worktree. NEVER commit directly to the default branch.
 Verify you are on a `loop/` branch:
@@ -110,10 +131,16 @@ git branch --show-current | grep -q '^loop/' || { echo "ERROR: not on a loop/ br
 Fetch the latest remote and rebase the worktree branch onto the default remote branch.
 This ensures the loop starts from an up-to-date base.
 
+> **Note:** Force-pushing to protected branches is blocked by GitHub's branch protection rules.
+> The sync script handles this gracefully by detecting the protected branch and skipping force-push.
+
 ```bash
 SYNC_OUTPUT=$($SCRIPTS_DIR/sync-with-remote) && SYNC_EXIT=0 || SYNC_EXIT=$?
 eval "$SYNC_OUTPUT"
 ```
+
+**eval output contract:** `sync-with-remote` emits `STATUS=<value>` to stdout.
+The `eval` call makes `STATUS` available as a shell variable for the conditional below.
 
 - **`STATUS=up-to-date` or `STATUS=rebased` (exit 0):** Continue to step 5.
 - **`STATUS=conflicts` (exit 1):** The rebase is paused with conflicts. Resolve them using the **"prefer local changes"** strategy (see below).
@@ -157,14 +184,32 @@ if [ "$FETCH_EXIT" -eq 1 ]; then
     echo "Issue is blocked. Aborting."
     exit 1
 fi
-ISSUE_NUMBER=$(echo "$FETCH_OUTPUT" | head -1 | sed 's/^NUMBER=//')
-ISSUE_BODY=$(echo "$FETCH_OUTPUT" | tail -n +2)
+if [ "$FETCH_EXIT" -eq 2 ]; then
+    echo "Warning: issue not found or not an issue reference — skipping context fetch" >&2
+    ISSUE_NUMBER=""
+    ISSUE_BODY=""
+else
+    ISSUE_NUMBER=$(echo "$FETCH_OUTPUT" | head -1 | sed 's/^NUMBER=//')
+    ISSUE_BODY=$(echo "$FETCH_OUTPUT" | tail -n +2)
+fi
 ```
 
 ### 5. Detect resume iteration
 
 ```bash
 START_ITERATION=$($SCRIPTS_DIR/detect-resume)
+```
+
+**Contract:** `detect-resume` returns a positive integer ≥ 1. If prior loop commits
+exist, it returns the next iteration number after the last completed phase. If no
+prior work exists, it returns 1.
+
+**Upper bound:** If `START_ITERATION` exceeds `MAX_ITERATIONS`, abort:
+```bash
+if [ "$START_ITERATION" -gt "$MAX_ITERATIONS" ]; then
+    echo "ERROR: resume iteration $START_ITERATION exceeds max ($MAX_ITERATIONS). Aborting." >&2
+    exit 1
+fi
 ```
 
 ### 6. Run the PDC loop
@@ -178,6 +223,7 @@ For each iteration from `START_ITERATION` to `MAX_ITERATIONS`:
 #### 6a. Generate isolated dev port
 
 ```bash
+# Port derived from task name hash — deterministic, avoids collisions
 LOOPER_DEV_PORT=$(( ( $(echo "$TASK_NAME" | cksum | cut -d' ' -f1) % 50000 ) + 10000 ))
 ```
 
@@ -255,10 +301,17 @@ VERDICT=$(git log --grep="Loop-Verdict:" -1 --format="%B" \
     | grep -oE 'Loop-Verdict: (PASS|FAIL)' | sed 's/Loop-Verdict: //' || echo "")
 ```
 
+**Verdict extraction contract:**
+- Format: `Loop-Verdict: PASS` or `Loop-Verdict: FAIL` in commit subject/body
+- Source: most recent commit matching `Loop-Verdict:` pattern
+- Tool: `git log --grep="Loop-Verdict:" -1 --format="%B"`
+
 - **PASS:** Break out of the loop, proceed to step 7.
 - **FAIL** (or no verdict): Continue to next iteration.
 
-### 7. Sync before PR (conditional)
+### 7. Sync before PR
+
+**Rationale:** The worktree may have drifted from the default branch during the loop (e.g., if another PR was merged). Re-syncing ensures the PR is mergeable without conflicts. This is especially important for long-running loops or multi-iteration tasks.
 
 ```bash
 # Check if we need to re-sync:
