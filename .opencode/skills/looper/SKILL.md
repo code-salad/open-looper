@@ -55,7 +55,32 @@ Continue anyway — do not abort.
 
 ### 2. Validate argument
 
-If `$ARGUMENTS` is empty, ask the user for a task description. Do not proceed without one.
+If `ARGUMENTS` is empty, follow the auto-selection path (step 2a).
+Otherwise, proceed directly to step 3.
+
+### 2a. Auto-select issue (when no arguments)
+
+```bash
+SCRIPTS_DIR="${REPO_ROOT}/.opencode/skills/looper/scripts"
+READY_JSON=$($SCRIPTS_DIR/list-ready-issues --json 2>/dev/null)
+READY_COUNT=$(echo "$READY_JSON" | jq 'length')
+```
+
+- **If `READY_COUNT` > 0:** Select the oldest issue (`READY_JSON | jq '.[0]'`), extract its number, and claim it:
+  ```bash
+  OLDEST=$(echo "$READY_JSON" | jq '.[0]')
+  ISSUE_NUM=$(echo "$OLDEST" | jq -r '.number')
+  ISSUE_TITLE=$(echo "$OLDEST" | jq -r '.title')
+
+  if $SCRIPTS_DIR/claim-issue "$ISSUE_NUM" 2>/dev/null; then
+      ARGUMENTS="#$ISSUE_NUM"
+  else
+      echo "Warning: could not claim issue #$ISSUE_NUM — falling back to manual entry" >&2
+      # Ask user for task description (continue to step 3 with empty → user prompt)
+      ARGUMENTS=""
+  fi
+  ```
+- **If `READY_COUNT` == 0:** Fall back to asking the user for a task description (continue to step 3 with empty → user prompt).
 
 ### 3. Generate task name
 
