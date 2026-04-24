@@ -116,14 +116,37 @@ eval "$SYNC_OUTPUT"
 ```
 
 - **`STATUS=up-to-date` or `STATUS=rebased` (exit 0):** Continue to step 5.
-- **`STATUS=conflicts` (exit 1):** The rebase is paused with conflicts. Resolve them:
-  1. List conflicted files: `git diff --name-only --diff-filter=U`
-  2. Read each conflicted file, understand both sides of the conflict.
-  3. Edit the file to resolve the conflict (remove conflict markers, keep correct code).
-  4. Stage each resolved file: `git add <file>`
-  5. Continue the rebase: `git rebase --continue`
-  6. If new conflicts appear, repeat until the rebase completes.
+- **`STATUS=conflicts` (exit 1):** The rebase is paused with conflicts. Resolve them using the **"prefer local changes"** strategy (see below).
 - **Exit 2 (error):** Warn and continue — the loop can still proceed without sync.
+
+**Capture sync state for step 7:**
+
+```bash
+SYNC_STATUS="${STATUS:-}"
+SYNC_HEAD=$(git rev-parse HEAD)
+```
+
+> **Conflict resolution strategy: prefer local (worktree) changes**
+>
+> When resolving rebase conflicts, prefer keeping your local changes (the worktree branch).
+> This is because the worktree branch contains the planned implementation, while the
+> remote branch is the shared baseline.
+>
+> For each conflicted file:
+> 1. Read the file to understand both sides of the conflict
+> 2. Use `git checkout --ours <file>` to keep your loop/ branch version (the "ours" side)
+> 3. Stage the resolved file: `git add <file>`
+> 4. Continue the rebase: `git rebase --continue`
+>
+> If new conflicts appear, repeat until the rebase completes.
+>
+> **Why prefer local?** The looper worktree is a disposable context for implementing
+> a fix. The remote baseline is the source of truth. Preferring local ensures the
+> planned changes are preserved.
+>
+> **Alternative (not recommended):** To prefer remote changes instead, use
+> `git checkout --theirs <file>` before `git add`. This discards local changes
+> and is generally not what you want in a loop/ worktree.
 
 ### 4c. Fetch issue context (if referenced)
 
@@ -235,19 +258,92 @@ VERDICT=$(git log --grep="Loop-Verdict:" -1 --format="%B" \
 - **PASS:** Break out of the loop, proceed to step 7.
 - **FAIL** (or no verdict): Continue to next iteration.
 
-### 7. Sync before PR
+### 7. Sync before PR (conditional)
 
 ```bash
-SYNC_OUTPUT=$($SCRIPTS_DIR/sync-with-remote) && SYNC_EXIT=0 || SYNC_EXIT=$?
-eval "$SYNC_OUTPUT"
+# Check if we need to re-sync:
+# 1. Did step 4b succeed with up-to-date or rebased?
+# 2. Are there new commits since step 4b?
+
+STEP4B_STATUS="${SYNC_STATUS:-}"
+STEP4B_HEAD="${SYNC_HEAD:-}"
+
+CURRENT_HEAD=$(git rev-parse HEAD)
+NEW_COMMITS=false
+
+if [ "$STEP4B_STATUS" = "up-to-date" ] || [ "$STEP4B_STATUS" = "rebased" ]; then
+    if [ "$CURRENT_HEAD" != "$STEP4B_HEAD" ]; then
+        NEW_COMMITS=true
+    fi
+fi
+
+if [ "$NEW_COMMITS" = true ]; then
+    echo "New commits detected — re-syncing with remote..."
+    SYNC_OUTPUT=$($SCRIPTS_DIR/sync-with-remote) && SYNC_EXIT=0 || SYNC_EXIT=$?
+    eval "$SYNC_OUTPUT"
+    # Handle conflicts using "prefer local" strategy (see step 4b)
+else
+    echo "No new commits since step 4b — skipping re-sync."
+fi
 ```
 
-Resolve any conflicts as in step 4b.
+**Never skip if step 4b had conflicts** — if `STEP4B_STATUS=conflicts`, always run the re-sync
+to allow resolution to proceed.
 
 ### 8. Report results and create PR
 
 - **PASS:** Report success with iteration count. Then invoke the `create-github-pr` skill to push the branch and create a PR.
 - **FAIL (max iterations):** Report failure. The worktree is preserved for debugging.
+
+### 8a. Wait for CI
+
+After creating the PR, poll until CI checks complete.
+
+```bash
+PR_NUMBER=$(gh pr view --json number --jq '.number')
+CI_STATUS=$(gh pr checks "$PR_NUMBER" --watch 2>&1) || CI_EXIT=$?
+```
+
+- **All checks pass:** Proceed to step 8b.
+- **Any check fails:** Report failure. Do NOT proceed to merge. Exit with error.
+- **Timeout (>20 min):** Report timeout. Do NOT proceed to merge. Exit with error.
+- **No checks configured:** Log "No CI checks configured" and proceed to step 8b.
+
+### 8b. Detect DB migrations
+
+Before merge, check whether the PR contains DB migration files:
+
+```bash
+CHANGED_FILES=$(git diff --name-only "$BASE_REF"...HEAD)
+HAS_MIGRATIONS=false
+
+if echo "$CHANGED_FILES" | grep -qiE \
+    '(migrations?/|db/migrate|alembic/versions|flyway|prisma/migrations|drizzle/|knex/migrations|sequelize/migrations|typeorm/migrations|migrate.*\.sql$|migration.*\.sql$)'; then
+    HAS_MIGRATIONS=true
+fi
+```
+
+Migration patterns detected:
+- `migrations/` or `migration/` — generic migration directories
+- `db/migrate/` — Rails ActiveRecord migrations
+- `alembic/versions/` — Python/Alembic migrations
+- `prisma/migrations/` — Prisma ORM migrations
+- `drizzle/` — Drizzle ORM migration files
+- `knex/migrations/`, `sequelize/migrations/`, `typeorm/migrations/` — other ORMs
+- `flyway/` — Flyway SQL migrations
+- Files matching `migrate*.sql` or `migration*.sql`
+
+### 8c. Merge or leave open
+
+```bash
+if [ "$HAS_MIGRATIONS" = true ]; then
+    echo "DB migrations detected — leaving PR open for manual review."
+    echo "Merge manually when ready: gh pr merge $PR_NUMBER --squash --delete-branch"
+else
+    # Proceed to create-github-pr for squash-merge (with --skip-db-check since we already checked)
+    invoke create-github-pr skill with --skip-db-check
+fi
+```
 
 ### 9. Clean up
 
