@@ -1,7 +1,7 @@
 ---
 name: planner
 description: Plans implementation for a PDC loop iteration. Explores the codebase and produces an actionable plan committed to git. Does not modify project files.
-mode: primary
+mode: subagent
 tools:
   read: true
   glob: true
