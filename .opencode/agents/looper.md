@@ -83,11 +83,11 @@ READY_COUNT=$(echo "$READY_JSON" | jq 'length')
 
 ### 3. Generate task name
 
-Sanitize `ARGUMENTS` into a kebab-case task name:
+Sanitize `ARGUMENTS` into a kebab-case task name. **Slashes are converted to hyphens** — the branch name (`loop/<task-name>`) cannot contain `/`:
 
 ```bash
 TASK_NAME=$(echo "$ARGUMENTS" \
-    | sed 's/[][]//g; s/[#[:space:]_-]+/-/g; s/[^a-zA-Z0-9-]//g' \
+    | sed 's/[][]//g; s/[#[:space:]_-]+/-/g; s/[^a-zA-Z0-9-]//g; s/\//-/g' \
     | sed 's/-\+/-/g; s/^-//; s/-$//' \
     | cut -c1-50 \
     | tr '[:upper:]' '[:lower:]')
@@ -120,6 +120,33 @@ if [ "$CURRENT_BRANCH" != "loop/$TASK_NAME" ] && [[ "$CURRENT_BRANCH" != loop/$T
 fi
 ```
 
+**Abort cleanup:** If the looper exits before completing the loop (any error or early exit after step 4), remove the worktree to avoid leaving behind stale directories:
+
+```bash
+# Register cleanup on any exit (error, ctrl-c, or explicit abort)
+# Only clean up if we are still inside the worktree directory
+CLEANUP_REGISTERED=false
+cleanup_on_abort() {
+    if [ "$CLEANUP_REGISTERED" = true ]; then
+        return
+    fi
+    CLEANUP_REGISTERED=true
+    # Only clean up if WORKTREE_DIR is set and we're inside it
+    if [ -n "$WORKTREE_DIR" ] && [ -d "$WORKTREE_DIR" ]; then
+        CURRENT_DIR="$(pwd)"
+        case "$CURRENT_DIR" in
+            "$WORKTREE_DIR"|"$WORKTREE_DIR"/*)
+                REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || echo "")
+                if [ -n "$REPO_ROOT" ]; then
+                    "$SCRIPTS_DIR/cleanup-worktree" --dir "$WORKTREE_DIR" 2>/dev/null || true
+                fi
+                ;;
+        esac
+    fi
+}
+trap cleanup_on_abort EXIT
+```
+
 ### 4b. Sync worktree with remote
 
 ```bash
@@ -134,17 +161,18 @@ eval "$SYNC_OUTPUT"
 |----------|---------|--------|
 | `up-to-date` | No divergent commits | Continue to step 4c |
 | `rebased` | Rebase succeeded cleanly | Continue to step 4c |
-| `conflicts` (exit 1) | Rebase conflicts detected | Resolve with "prefer local" strategy (see below) |
+| `conflicts` (exit 1) | Rebase conflicts detected | Resolve with "prefer theirs" strategy (see below) |
 | (exit 2) | Fetch failed / no remote | Warn and continue |
 
-**Conflict resolution ("prefer local changes"):**
+**Conflict resolution ("prefer theirs" — keep local loop changes):**
 
+During a rebase onto `origin/<default-branch>`, `--ours` refers to the branch being rebased onto (the loop branch's commits), and `--theirs` refers to the upstream commits. We want to keep our local changes, so we use `--theirs`:
 ```bash
 if [ "$SYNC_STATUS" = "conflicts" ]; then
     echo "[loop] Resolving rebase conflicts (preferring local changes)..." >&2
     CONFLICT_FILES=$(git diff --name-only --diff-filter=U)
     for file in $CONFLICT_FILES; do
-        git checkout --ours "$file"
+        git checkout --theirs "$file"
         git add "$file"
     done
     git rebase --continue 2>&1 || {
@@ -152,7 +180,7 @@ if [ "$SYNC_STATUS" = "conflicts" ]; then
         while git status | grep -q "Unmerged paths"; do
             CONFLICT_FILES=$(git diff --name-only --diff-filter=U)
             for file in $CONFLICT_FILES; do
-                git checkout --ours "$file"
+                git checkout --theirs "$file"
                 git add "$file"
             done
             git rebase --continue 2>&1 || break
@@ -230,9 +258,14 @@ COMPOSE_INFO=$($SCRIPTS_DIR/detect-compose 2>&1)
 HAS_COMPOSE=$(echo "$COMPOSE_INFO" | jq -r 'if .compose_file != "none" then "true" else "false" end')
 COMPOSE_SERVICES="none"
 if [ "$HAS_COMPOSE" = "true" ]; then
-    $SCRIPTS_DIR/compose-isolate --task "$TASK_NAME" >&2
-    COMPOSE_SERVICES=$(echo "$COMPOSE_INFO" | jq -r '[.services | keys[]] | join(", ")')
-    echo "[loop] Docker Compose detected: $COMPOSE_SERVICES" >&2
+    COMPOSE_OUTPUT=$($SCRIPTS_DIR/compose-isolate --task "$TASK_NAME" 2>&1); COMPOSE_EXIT=$?
+    if [ "$COMPOSE_EXIT" -ne 0 ]; then
+        echo "[loop] Warning: compose-isolate failed (exit $COMPOSE_EXIT) — proceeding without isolated services" >&2
+        HAS_COMPOSE="false"
+    else
+        COMPOSE_SERVICES=$(echo "$COMPOSE_INFO" | jq -r '[.services | keys[]] | join(", ")')
+        echo "[loop] Docker Compose detected: $COMPOSE_SERVICES" >&2
+    fi
 fi
 ```
 
@@ -246,7 +279,10 @@ if [ "$ITERATION" -gt 1 ]; then
         --grep="Loop-Iteration: $((ITERATION - 1))" \
         --all-match --format="%H" -1 2>/dev/null || echo "")
     if [ -n "$LAST_CHECK_HASH" ]; then
-        DIFF_CONTEXT=$(git diff --stat "$LAST_CHECK_HASH" HEAD 2>/dev/null | head -50)
+        DIFF_CONTEXT=$(git diff "$LAST_CHECK_HASH" HEAD 2>/dev/null | head -200)
+        if [ -z "$DIFF_CONTEXT" ]; then
+            DIFF_CONTEXT="No files changed since last check."
+        fi
     else
         DIFF_CONTEXT="No prior check commit found — full review required."
     fi
@@ -319,6 +355,11 @@ if [ "$PRE_CHECK_EXIT" -ne 0 ]; then
         --phase "check" \
         --iteration "$ITERATION" \
         --verdict "FAIL" >&2
+    if [ "$ITERATION" -ge "$MAX_ITERATIONS" ]; then
+        echo "[loop] Pre-check failed at max iteration ($MAX_ITERATIONS). Loop exhausted." >&2
+        echo "[loop] Worktree left at $WORKTREE_DIR for manual recovery." >&2
+        exit 1
+    fi
     echo "[loop] Proceeding to next iteration." >&2
     continue
 fi
@@ -419,11 +460,11 @@ SCRIPTS_DIR: $SCRIPTS_DIR
 |----------|--------|
 | `setup-worktree` fails | Abort — no worktree means nowhere to run |
 | Not on `loop/` branch after setup | Abort — corruption of branch state |
-| `sync-with-remote` exit 2 (error) | Warn and continue; do not abort |
-| `sync-with-remote` exit 1 (conflicts) | Resolve conflicts (prefer local), retry rebase |
 | `fetch-issue-context` exit 1 (blocked) | Abort — the issue cannot be worked on |
 | `START_ITERATION > MAX_ITERATIONS` | Abort — resume bounds exceeded |
-| Pre-check fails | Commit FAIL, skip Checker, continue loop |
+| `sync-with-remote` exit 2 (error) | Warn and continue; do not abort |
+| `sync-with-remote` exit 1 (conflicts) | Resolve conflicts (prefer theirs), retry rebase |
+| Pre-check fails | Commit FAIL, skip Checker. If at MAX_ITERATIONS, abort (loop exhausted). |
 | Checker returns no verdict | Treat as FAIL, continue loop |
 | CI timeout (>20 min) | Report timeout; do NOT merge |
 | CI checks fail | Report failure; do NOT merge |
@@ -460,5 +501,7 @@ SCRIPTS_DIR: $SCRIPTS_DIR
 - **Fire-and-forget for unrelated issues** — if you discover a bug unrelated to your task, spawn `looper-gh-issue-creator` in the background and continue
 - **No verdicts = FAIL** — if the Checker produces no verdict commit, treat it as a FAIL and continue iterating
 - **Pre-check is a gate** — if pre-check fails, skip the Checker and commit FAIL immediately
-- **Prefer local on conflict** — when rebasing onto remote produces conflicts, prefer the loop branch's version
+- **Prefer theirs on conflict** — when rebasing onto remote produces conflicts, prefer the loop branch's version (`--theirs`, not `--ours`)
+- **Abort cleanup** — register a trap on entry to step 4 so stale worktrees are removed if the loop aborts before completing
+- **Max-iteration pre-check failure** — if pre-check fails at iteration = MAX_ITERATIONS, abort (loop exhausted, no more retries)
 - **Security note (step 4b and step 7):** `eval "$SYNC_OUTPUT"` is used to apply shell variable assignments from `sync-with-remote`. Only call `eval` on output from trusted scripts in this codebase.
