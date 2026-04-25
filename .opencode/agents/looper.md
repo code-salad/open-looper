@@ -124,24 +124,17 @@ fi
 
 ```bash
 # Register cleanup on any exit (error, ctrl-c, or explicit abort)
-# Only clean up if we are still inside the worktree directory
 CLEANUP_REGISTERED=false
 cleanup_on_abort() {
     if [ "$CLEANUP_REGISTERED" = true ]; then
         return
     fi
     CLEANUP_REGISTERED=true
-    # Only clean up if WORKTREE_DIR is set and we're inside it
     if [ -n "$WORKTREE_DIR" ] && [ -d "$WORKTREE_DIR" ]; then
-        CURRENT_DIR="$(pwd)"
-        case "$CURRENT_DIR" in
-            "$WORKTREE_DIR"|"$WORKTREE_DIR"/*)
-                REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || echo "")
-                if [ -n "$REPO_ROOT" ]; then
-                    "$SCRIPTS_DIR/cleanup-worktree" --dir "$WORKTREE_DIR" 2>/dev/null || true
-                fi
-                ;;
-        esac
+        REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || echo "")
+        if [ -n "$REPO_ROOT" ]; then
+            "$SCRIPTS_DIR/cleanup-worktree" --dir "$WORKTREE_DIR" 2>/dev/null || true
+        fi
     fi
 }
 trap cleanup_on_abort EXIT
@@ -166,7 +159,7 @@ eval "$SYNC_OUTPUT"
 
 **Conflict resolution ("prefer theirs" — keep local loop changes):**
 
-During a rebase onto `origin/<default-branch>`, `--ours` refers to the branch being rebased onto (the loop branch's commits), and `--theirs` refers to the upstream commits. We want to keep our local changes, so we use `--theirs`:
+During `git rebase origin/<default-branch>`, `--ours` refers to the branch being rebased onto (upstream = origin/<default-branch>) and `--theirs` refers to the branch being rebased from (the loop branch). We want to keep our local changes, so we use `--theirs`:
 ```bash
 if [ "$SYNC_STATUS" = "conflicts" ]; then
     echo "[loop] Resolving rebase conflicts (preferring local changes)..." >&2
