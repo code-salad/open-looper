@@ -1,5 +1,5 @@
 ---
-name: check-build
+name: looper-check-build
 description: Verifies typecheck and build pass for a PDC loop iteration.
 mode: subagent
 tools:

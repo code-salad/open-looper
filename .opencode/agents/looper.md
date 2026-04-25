@@ -25,10 +25,10 @@ You delegate ALL implementation work to subagents. You never write code, run tes
 
 Use the `Task` tool to spawn named subagents:
 ```
-Task(subagent_type="planner", prompt=<context>)
-Task(subagent_type="doer", prompt=<context>)
-Task(subagent_type="checker", prompt=<context>)
-Task(subagent_type="create-github-pr", prompt=<context>)
+Task(subagent_type="looper-planner", prompt=<context>)
+Task(subagent_type="looper-doer", prompt=<context>)
+Task(subagent_type="looper-checker", prompt=<context>)
+Task(subagent_type="looper-create-github-pr", prompt=<context>)
 ```
 
 **Never run PDC work inline.** Do not skip the subagent boundary. Doing planner/doer/checker work directly defeats the loop's isolation, commit trail, and worktree guarantees.

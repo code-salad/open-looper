@@ -1,5 +1,5 @@
 ---
-name: gh-issue-creator
+name: looper-gh-issue-creator
 description: Creates a structured GitHub issue (bug, feature, task, improvement) with explicit dependencies, blockers, and subtasks. Fire-and-forget — does not block the calling agent.
 mode: subagent
 tools:

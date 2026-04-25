@@ -1,5 +1,5 @@
 ---
-name: check-runtime
+name: looper-check-runtime
 description: Verifies runtime behavior via dev server before/after testing, integration tests, and ticket-scenario testing for a PDC loop iteration.
 mode: subagent
 tools:

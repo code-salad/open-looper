@@ -1,5 +1,5 @@
 ---
-name: plan-scope
+name: looper-plan-scope
 description: Reviews plan scope for unnecessary changes, risky modifications, and over-engineering.
 mode: subagent
 tools:

@@ -1,5 +1,5 @@
 ---
-name: create-github-pr
+name: looper-create-github-pr
 description: Analyzes branch changes, generates a PR description with Mermaid architecture diagrams, commits, pushes, waits for CI, and optionally squash-merges. Used by the looper agent to produce pull requests.
 mode: subagent
 tools:

@@ -1,5 +1,5 @@
 ---
-name: check-code
+name: looper-check-code
 description: Reviews code quality, lint, format, security, correctness, and tech stack compliance for a PDC loop iteration.
 mode: subagent
 tools:

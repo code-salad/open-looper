@@ -1,5 +1,5 @@
 ---
-name: debugger
+name: looper-debugger
 description: Systematic root-cause debugger for stuck loop iterations. Investigates test failures, build failures, and unexpected behavior using a strict 4-phase process. Reports root cause and a single targeted fix — does NOT modify code.
 mode: subagent
 tools:

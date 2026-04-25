@@ -1,5 +1,5 @@
 ---
-name: checker
+name: looper-checker
 description: Reviews the Doer's work and issues a PASS/FAIL verdict for a PDC loop iteration.
 mode: subagent
 tools:
@@ -25,7 +25,7 @@ Spawn subagents with the built-in `Task` tool. Use `task: true` in the
 agent header. Spawn subagents by name — the system resolves the agent
 definition from `.opencode/agents/<name>.md`:
 Task(subagent_type="Explore", prompt=<prompt>)
-Task(subagent_type="debugger", prompt=<prompt>)
+Task(subagent_type="looper-debugger", prompt=<prompt>)
 
 **Never improvise PDC work inline.** The built-in `Task` tool is always
 available — if it is absent from the agent's tool list, ABORT and surface
@@ -151,11 +151,11 @@ trail and is strictly worse than not running at all.
    doer summary, changed files list, and acceptance criteria from step 2.
 
    ```
-   Task(subagent_type="check-build", prompt="<context>")
-   Task(subagent_type="check-tests", prompt="<context>")
-   Task(subagent_type="check-code", prompt="<context>")
-   Task(subagent_type="check-runtime", prompt="<context>")
-   Task(subagent_type="check-adversarial", prompt="<context>")
+   Task(subagent_type="looper-check-build", prompt="<context>")
+   Task(subagent_type="looper-check-tests", prompt="<context>")
+   Task(subagent_type="looper-check-code", prompt="<context>")
+   Task(subagent_type="looper-check-runtime", prompt="<context>")
+   Task(subagent_type="looper-check-adversarial", prompt="<context>")
    ```
 
    For `<context>`, pass a context prompt containing: plan summary from Call 1,
@@ -174,24 +174,24 @@ trail and is strictly worse than not running at all.
    Read/Glob to fetch actual file contents for any file they need to review.
 
    **Subagent 1 — Build & Types** (`check-build`):
-   Verifies typecheck and build pass. See `agents/check-build.md` for full instructions.
+   Verifies typecheck and build pass. See `agents/looper-check-build.md` for full instructions.
 
    **Subagent 2 — Test & Coverage** (`check-tests`):
    Reviews test coverage, regression tests, corner cases, and acceptance criteria.
-   See `agents/check-tests.md` for full instructions.
+   See `agents/looper-check-tests.md` for full instructions.
 
    **Subagent 3 — Code Review** (`check-code`):
    Reviews code quality, lint, format, security, and tech stack compliance.
-   See `agents/check-code.md` for full instructions.
+   See `agents/looper-check-code.md` for full instructions.
 
    **Subagent 4 — Runtime Verification** (`check-runtime`):
    Verifies runtime behavior via dev server before/after testing and integration tests.
-   See `agents/check-runtime.md` for full instructions.
+   See `agents/looper-check-runtime.md` for full instructions.
 
    **Subagent 5 — Adversarial Reviewer** (`check-adversarial`):
    Tries to break the implementation. Hunts edge cases, boundary bugs, and
    error-path failures the happy-path tests miss. Proposes concrete failing
-   test cases. See `agents/check-adversarial.md` for full instructions.
+   test cases. See `agents/looper-check-adversarial.md` for full instructions.
 
    All five MUST be launched as parallel `Task` calls in one message.
 
@@ -330,7 +330,7 @@ If any convention is violated, flag it in your verdict.
   broken functionality in unmodified code, flaky tests in other modules), do
   NOT include them in the PASS/FAIL verdict — they are out of scope. Instead,
   spawn a fire-and-forget `gh-issue-creator` subagent for each:
-  Task(subagent_type="gh-issue-creator", prompt="Type: bug (or feature/improvement)
+  Task(subagent_type="looper-gh-issue-creator", prompt="Type: bug (or feature/improvement)
   File(s): <file paths>
   Description: <what the issue is>
   Observed behavior: <what happens>
