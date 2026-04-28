@@ -1,184 +1,91 @@
-# Code Diagram (L4)
-
-## open-looper Key Implementation Patterns
+# L4 Code Diagram - Key Implementation Patterns
 
 ```mermaid
-C4Component
-    title Code Diagram - Key Patterns and Formats
+C4Code
+  title Open-Looper Code Diagram - Implementation Patterns
 
-    Component_Boundary(patterns, "Implementation Patterns") {
-        Component(agent_def, "Agent Definition Format", "Markdown-based agent specifications")
-        Component(git_trailers, "Git Commit Trailers", "Loop-Phase, Loop-Iteration, Loop-Verdict")
-        Component(worktree_setup, "Worktree Setup", "Git worktree isolation per task")
-        Component(tdd_cycle, "TDD Cycle", "RED → GREEN → SIMPLIFY")
-    }
+  Boundary(core, "Core Loop Pattern") {
+    Component(plan_fn, "plan()", "Function", "Creates plan commit with test descriptions")
+    Component(do_fn, "do()", "Function", "Executes RED→GREEN→SIMPLIFY cycle")
+    Component(check_fn, "check()", "Function", "Runs verification and issues verdict")
+    Component(loop, "while !done", "Loop", "Iterates until checker passes or max iterations")
+  }
 
-    Component_Boundary(formats, "Data Formats") {
-        Component(plan_format, "Plan Format", ".opencode/plans/<task>/iteration-N.md")
-        Component(context_format, "Context Format", "JSON with TASK_NAME, ITERATION, SCRIPTS_DIR")
-        Component(commit_msg, "Commit Message", "type(scope): description body")
-    }
+  Boundary(tdd, "TDD Cycle") {
+    Component(red_phase, "RED Phase", "Phase", "Write failing tests first")
+    Component(green_phase, "GREEN Phase", "Phase", "Implement minimum code to pass")
+    Component(simplify_phase, "SIMPLIFY Phase", "Phase", "Refactor and clean up code")
+  }
 
-    Rel(agent_def, git_trailers, "Uses for auditing")
-    Rel(agent_def, worktree_setup, "Creates isolation")
-    Rel(git_trailers, tdd_cycle, "Tracks phase progression")
-    Rel(plan_format, context_format, "Passes context to agents")
-    Rel(worktree_setup, commit_msg, "Creates conventional commits")
-    Rel(tdd_cycle, commit_msg, "Generates commit messages")
+  Boundary(patterns, "Key Patterns") {
+    Component(subagent_spawn, "Task() spawn", "Pattern", "Launch sub-agents with spec and context")
+    Component(commit_trail, "Commit Trail", "Pattern", "Each phase commits with trailers for traceability")
+    Component(pointer_resolution, "Delta Pointers", "Pattern", "Plans reference prior iterations by hash")
+    Component(skill_discovery, "Skill Discovery", "Pattern", "Load skills via $SCRIPTS_DIR/<name>")
+  }
+
+  Rel(loop, plan_fn, "1. Plan")
+  Rel(loop, do_fn, "2. Do")
+  Rel(loop, check_fn, "3. Check")
+
+  Rel(do_fn, red_phase, "Writes tests")
+  Rel(do_fn, green_phase, "Implements")
+  Rel(do_fn, simplify_phase, "Refactors")
+
+  Rel(red_phase, green_phase, "Commits RED → GREEN")
+  Rel(green_phase, simplify_phase, "Commits GREEN → SIMPLIFY")
+
+  Rel(subagent_spawn, commit_trail, "Metadata in commits")
+  Rel(pointer_resolution, commit_trail, "Hash references")
+  Rel(skill_discovery, commit_trail, "Scripts track state")
+
+  ShowLegend()
 ```
 
-## Pattern 1: Agent Definition Format
+## Implementation Patterns
 
-```markdown
-# Agent Name
+### Core Loop Pattern
+The PDC loop follows a simple but powerful structure:
 
-## Description
-Brief description of agent purpose.
-
-## Mode
-primary | subagent
-
-## Instructions
-Step-by-step instructions...
-
-## Usage
-```bash
-$AGENTS_DIR/<agent-name>
-```
-
-## Examples
-Example invocations...
-```
-
-## Pattern 2: Git Commit Trailers
-
-Commits follow conventional commit format with PDC loop trailers:
-
-```
-type(scope): short description
-
-Longer description of changes made.
-
-Loop-Phase: do-red | do-green | do-simplify | do-integration
-Loop-Iteration: N
-Loop-Verdict: PASS | FAIL (at checker phase)
-```
-
-### Trailer Types
-
-| Trailer | Values | Purpose |
-|---------|--------|---------|
-| **Loop-Phase** | plan, do-red, do-green, do-simplify, do-integration, do-check | Current phase |
-| **Loop-Iteration** | 1, 2, 3, ... | Iteration number |
-| **Loop-Verdict** | PASS, FAIL | Checker verdict (if applicable) |
-
-## Pattern 3: Worktree Setup
-
-```bash
-# Create isolated worktree for task
-setup-worktree --task <task-name> --iteration <N>
-
-# Result: .worktrees/<task-name>/
-# - Isolated git branch per task
-# - No interference with main branch
-# - Easy cleanup on completion
-```
-
-### Worktree Directory Structure
-
-```
-.worktrees/
-└── <task-name>/
-    ├── .git/              # Worktree git data
-    ├── .opencode/         # Agent definitions
-    │   └── agents/
-    ├── docs/              # Documentation
-    └── [project files]    # Task-specific changes
-```
-
-## Pattern 4: TDD Cycle (RED-GREEN-SIMPLIFY)
-
-```
-┌─────────────────────────────────────────┐
-│  RED PHASE                              │
-│  - Write failing test first             │
-│  - Commit: "red: add failing tests"     │
-│  - Loop-Phase: do-red                   │
-└────────────────┬──────────────────────┘
-                 │ Tests fail
-                 ▼
-┌─────────────────────────────────────────┐
-│  GREEN PHASE                            │
-│  - Implement minimal code to pass       │
-│  - Commit: "green: implement feature"   │
-│  - Loop-Phase: do-green                 │
-└────────────────┬──────────────────────┘
-                 │ Tests pass
-                 ▼
-┌─────────────────────────────────────────┐
-│  SIMPLIFY PHASE                         │
-│  - Refine implementation                 │
-│  - Remove redundancy, improve naming    │
-│  - Commit: "simplify: refine impl"      │
-│  - Loop-Phase: do-simplify               │
-└─────────────────────────────────────────┘
-```
-
-## Pattern 5: Plan Format
-
-```markdown
-# Plan: <Task Name>
-
-## Bug Analysis / Feature Description
-...
-
-## Fix Plan / Implementation Plan
-...
-
-## Files to modify
-...
-
-## Tests
-...
-
-## Acceptance Criteria
-...
-
-Loop-Phase: plan
-Loop-Iteration: N
-```
-
-## Pattern 6: Agent Context (JSON)
-
-```json
-{
-  "TASK_NAME": "add-authentication",
-  "ITERATION": 1,
-  "MAX_ITERATIONS": 5,
-  "SCRIPTS_DIR": "/path/to/.opencode/scripts",
-  "AGENTS_DIR": "/path/to/.opencode/agents",
-  "WORKTREE_DIR": "/path/to/.worktrees/add-authentication"
+```javascript
+async function runLoop(task, maxIterations = 10) {
+  for (let i = 1; i <= maxIterations; i++) {
+    const plan = await planner.createPlan(task, i);
+    await doer.execute(plan, i);
+    const verdict = await checker.verify(plan, i);
+    if (verdict === 'PASS') break;
+  }
 }
 ```
 
-## Pattern 7: Conventional Commit Format
+### TDD Cycle (RED→GREEN→REFACTOR)
+1. **RED** - Write failing tests derived from acceptance criteria
+2. **GREEN** - Write minimum implementation to pass tests
+3. **SIMPLIFY** - Refactor without changing behavior
 
+### Sub-Agent Spawning Pattern
+```javascript
+Task(subagent_type="explore", prompt="<task-spec>", task_id?)
 ```
-<type>(<scope>): <short description>
+- Each sub-agent receives task description, context, and success criteria
+- Results returned synchronously unless `run_in_background=true`
 
-[optional body]
-
-[optional trailers]
+### Commit Trail Pattern
+Each phase commits with trailers for traceability:
+```
+Loop-Phase: do-red
+Loop-Iteration: 3
 ```
 
-### Commit Types
+### Delta Pointer Resolution
+Plans can reference prior iterations:
+```
+(unchanged from iteration 2 — see abc1234)
+```
+Resolved via `git log <hash> -1 --format="%B"`
 
-| Type | Description |
-|------|-------------|
-| `feat` | New feature |
-| `fix` | Bug fix |
-| `refactor` | Code refactoring |
-| `test` | Test additions/changes |
-| `docs` | Documentation changes |
-| `chore` | Maintenance tasks |
-| `plan` | Plan commit (planner phase) |
+### Skill Discovery
+Scripts discovered and invoked via:
+```bash
+$SCRIPTS_DIR/<skill-name> [--args]
+```
