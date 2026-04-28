@@ -45,9 +45,10 @@ file `<name>.sh` is a self-contained adapter that the dispatcher selects via
 
 | File | Backend name | Notes |
 |---|---|---|
-| `docker.sh` | `docker` | Default; DooD via `/var/run/docker.sock` |
+| `docker.sh` | `docker` | DooD via `/var/run/docker.sock` |
 | `sbx.sh` | `sbx` | microVM via `sbx` CLI; requires KVM |
-| `null.sh` | `null` | Runs `claude -p` directly on the host; reference implementation |
+| `yolobox.sh` | `yolobox` | Yolobox sandbox with Docker-in-Docker and opencode |
+| `null.sh` | `null` | Runs opencode directly on the host; reference implementation |
 
 The `null` backend is intentionally not exposed through the
 `/looper:looper-sandboxed` skill (which gates on `docker|sbx` in Phase 1).
