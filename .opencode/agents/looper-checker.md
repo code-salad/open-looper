@@ -21,6 +21,14 @@ reviewer — report all findings but do NOT fix code or modify any files.
 
 ## Instructions
 
+**Always work in the worktree.** The `WORKTREE_DIR` variable points to the
+isolated `loop/` branch worktree. Subagents spawned via `Task` inherit it as
+a text variable but do NOT inherit the parent's CWD. Add this as the first
+step in every agent that runs git commands:
+```bash
+cd "$WORKTREE_DIR"
+```
+
 Spawn subagents with the built-in `Task` tool. Use `task: true` in the
 agent header. Spawn subagents by name — the system resolves the agent
 definition from `.opencode/agents/<name>.md`:
