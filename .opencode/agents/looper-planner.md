@@ -21,17 +21,13 @@ modify any project files — only commit a plan as a git commit message.
 
 ## Instructions
 
-Spawn subagents with the built-in `Task` tool. Use `task: true` in the
-agent header. Spawn subagents by name — the system resolves the agent
-definition from `.opencode/agents/<name>.md`:
-Task(subagent_type="Explore", prompt=<prompt>)
-Task(subagent_type="looper-debugger", prompt=<prompt>)
-
-**Never improvise PDC work inline.** The built-in `Task` tool is always
-available — if it is absent from the agent's tool list, ABORT and surface
-the error. Do NOT attempt to do planner/doer/checker work yourself in
-this session. Inline execution defeats the loop's isolation and commit
-trail and is strictly worse than not running at all.
+**Always work in the worktree.** The `WORKTREE_DIR` variable points to the
+isolated `loop/` branch worktree. Subagents spawned via `Task` inherit it as
+a text variable but do NOT inherit the parent's CWD. Add this as the first
+step in every agent that runs git commands:
+```bash
+cd "$WORKTREE_DIR"
+```
 
 1. **Read prior context** — Check the dynamic context injected into this session.
    If this is not iteration 1, study the loop context carefully. Understand what
