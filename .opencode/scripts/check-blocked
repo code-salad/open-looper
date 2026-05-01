@@ -1,0 +1,96 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# check-blocked — Determine if a GitHub issue is blocked
+#
+# Usage: check-blocked --issue N [--repo owner/repo]
+# Exit 0: not blocked (issue is ready to work on)
+# Exit 1: blocked (by label or open dependencies)
+# Exit 2: usage error or issue not found
+
+GH_REPO_ARGS=()
+ISSUE_NUMBER=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --issue)
+            if [[ $# -lt 2 ]] || [[ -z "$2" ]]; then
+                echo "Usage: check-blocked --issue N [--repo owner/repo]" >&2
+                echo "Error: --issue requires a number" >&2
+                exit 2
+            fi
+            ISSUE_NUMBER="$2"
+            shift 2
+            ;;
+        --repo)
+            if [[ $# -lt 2 ]] || [[ -z "$2" ]]; then
+                echo "Usage: check-blocked --issue N [--repo owner/repo]" >&2
+                echo "Error: --repo requires owner/repo" >&2
+                exit 2
+            fi
+            GH_REPO_ARGS=("--repo" "$2")
+            shift 2
+            ;;
+        *)
+            echo "Usage: check-blocked --issue N [--repo owner/repo]" >&2
+            exit 2
+            ;;
+    esac
+done
+
+if [[ -z "$ISSUE_NUMBER" ]]; then
+    echo "Usage: check-blocked --issue N [--repo owner/repo]" >&2
+    echo "Error: --issue is required" >&2
+    exit 2
+fi
+
+# Verify issue exists and get labels + dependency info
+ISSUE_DATA=$(gh issue view "$ISSUE_NUMBER" \
+    --json number,title,labels,body,state \
+    "${GH_REPO_ARGS[@]}" 2>&1) || {
+    echo "Issue #$ISSUE_NUMBER not found or cannot be accessed" >&2
+    exit 2
+}
+
+# Check for blocked labels
+LABELS=$(echo "$ISSUE_DATA" | jq -r '.labels[].name' 2>/dev/null || echo "")
+for label in $LABELS; do
+    case "${label,,}" in
+        blocked|invalid|wontfix|duplicate)
+            echo "Issue #$ISSUE_NUMBER has '$label' label — blocked" >&2
+            exit 1
+            ;;
+    esac
+done
+
+# Check for blocked state
+STATE=$(echo "$ISSUE_DATA" | jq -r '.state' 2>/dev/null || echo "")
+if [[ "$STATE" != "OPEN" ]]; then
+    echo "Issue #$ISSUE_NUMBER is $STATE — not open, blocked" >&2
+    exit 1
+fi
+
+# Check body for dependency references that indicate blockers
+# Look for patterns like "Blocked by #N" or "Depends on #N"
+BODY=$(echo "$ISSUE_DATA" | jq -r '.body' 2>/dev/null || echo "")
+
+# Check for "blocked by" references
+BLOCKED_BY_REFS=$(echo "$BODY" | grep -oE '#[[:digit:]]+' | grep -v "^#${ISSUE_NUMBER}$" | sort -u || true)
+if [[ -n "$BLOCKED_BY_REFS" ]]; then
+    # For each referenced issue, check if it's still open
+    for ref in $BLOCKED_BY_REFS; do
+        ref_num=$(echo "$ref" | tr -d '#')
+        # Check if this is a "blocked by" reference (look for it in context)
+        # Simple heuristic: if body mentions "blocked by #$ref_num" or "depends on #$ref_num"
+        if echo "$BODY" | grep -qiE "blocked by.*#$ref_num|depends on.*#$ref_num|requires.*#$ref_num"; then
+            REF_STATE=$(gh issue view "$ref_num" --json state --jq '.state' "${GH_REPO_ARGS[@]}" 2>/dev/null || echo "CLOSED")
+            if [[ "$REF_STATE" == "OPEN" ]]; then
+                echo "Issue #$ISSUE_NUMBER is blocked by open issue #$ref_num" >&2
+                exit 1
+            fi
+        fi
+    done
+fi
+
+# Not blocked — issue is ready
+exit 0

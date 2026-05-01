@@ -11,19 +11,20 @@ tools:
 
 # Looper Orchestrator
 
-Single orchestrator managing the full flow. No planner — the GitHub issue IS the spec.
+Single orchestrator managing the full PDC loop. No planner — the GitHub issue IS the spec.
 
 ## Flow
 
 ```
 Orchestrator
-  ├── Pull Issue (issue = spec + acceptance criteria)
-  ├── Create Worktree
+  ├── Validate environment
+  ├── Parse task / auto-select issue
+  ├── Create worktree
   ├── TDD Loop (Doer subagent, max 3 iterations)
   │     └── red → green → refactor
   ├── Reviewer Loop (max 2 rounds)
   │     └── Validates: works, maintainable, fast, corner cases
-  ├── Pass → Merge & cleanup
+  ├── Pass → Sync & create PR
   └── Fail → Abort & cleanup
 ```
 
@@ -38,6 +39,14 @@ if [ ! -d "$SCRIPTS_DIR" ]; then
     echo "ERROR: looper scripts not found at $SCRIPTS_DIR" >&2
     exit 1
 fi
+
+# Verify required scripts exist
+for script in setup-worktree fetch-issue-context git-commit-loop; do
+    if [ ! -x "$SCRIPTS_DIR/$script" ]; then
+        echo "ERROR: required script $script not found or not executable" >&2
+        exit 1
+    fi
+done
 ```
 
 ### 1. Validate git repo
@@ -48,22 +57,39 @@ git rev-parse --is-inside-work-tree
 
 ### 2. Parse arguments
 
-If empty, auto-select from ready issues:
+Parse task from `$ARGUMENTS`:
 ```bash
-READY_JSON=$($SCRIPTS_DIR/list-ready-issues --json 2>/dev/null)
-READY_COUNT=$(echo "$READY_JSON" | jq 'length')
+TASK_ARG="${ARGUMENTS:-}"
+if [ -z "$TASK_ARG" ]; then
+    echo "[looper] No task specified, auto-selecting from ready issues..." >&2
+    READY_JSON=$($SCRIPTS_DIR/list-ready-issues --json 2>/dev/null || echo "[]")
+    READY_COUNT=$(echo "$READY_JSON" | jq 'length' 2>/dev/null || echo "0")
+    if [ "$READY_COUNT" -eq 0 ]; then
+        echo "ERROR: No ready issues found. Provide a task explicitly." >&2
+        exit 1
+    fi
+    # Auto-select oldest issue
+    SELECTED=$(echo "$READY_JSON" | jq -r '.[0]')
+    ISSUE_NUMBER=$(echo "$SELECTED" | jq -r '.number')
+    TASK_ARG=$(echo "$SELECTED" | jq -r '.title')
+    echo "[looper] Auto-selected issue #$ISSUE_NUMBER: $TASK_ARG" >&2
+else
+    # Extract issue number from arguments if present
+    ISSUE_NUMBER=$(echo "$TASK_ARG" | grep -oE '#[0-9]+' | head -1 | tr -d '#' || echo "")
+fi
 ```
 
 ### 3. Generate task name
 
 ```bash
-TASK_NAME=$(echo "$ARGUMENTS" \
+TASK_NAME=$(echo "$TASK_ARG" \
     | sed 's/[][]//g; s/[#[:space:]_-]+/-/g; s/[^a-zA-Z0-9-]//g; s/\//-/g' \
     | sed 's/-\+/-/g; s/^-//; s/-$//' \
     | cut -c1-50 \
     | tr '[:upper:]' '[:lower:]')
 TASK_NAME=${TASK_NAME%%-}
 TASK_NAME=${TASK_NAME##-}
+[ -z "$TASK_NAME" ] && TASK_NAME="task-$(date +%Y%m%d-%H%M%S)"
 ```
 
 ### 4. Create worktree
@@ -76,15 +102,19 @@ if [ "$SETUP_EXIT" -ne 0 ] || [ -z "$WORKTREE_DIR" ]; then
     exit 1
 fi
 cd "$WORKTREE_DIR"
+echo "[looper] Worktree: $WORKTREE_DIR" >&2
 ```
 
-**Abort cleanup:**
+**Abort cleanup trap:**
 ```bash
 cleanup_on_abort() {
+    local exit_code=$?
     if [ -n "$WORKTREE_DIR" ] && [ -d "$WORKTREE_DIR" ]; then
+        echo "[looper] Cleaning up worktree on abort..." >&2
         REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || echo "")
         [ -n "$REPO_ROOT" ] && "$SCRIPTS_DIR/cleanup-worktree" --dir "$WORKTREE_DIR" 2>/dev/null || true
     fi
+    exit $exit_code
 }
 trap cleanup_on_abort EXIT
 ```
@@ -92,9 +122,9 @@ trap cleanup_on_abort EXIT
 ### 5. Fetch issue context
 
 ```bash
-FETCH_OUTPUT=$($SCRIPTS_DIR/fetch-issue-context --args "$ARGUMENTS" 2>&1); FETCH_EXIT=$?
+FETCH_OUTPUT=$($SCRIPTS_DIR/fetch-issue-context --args "$TASK_ARG" 2>&1); FETCH_EXIT=$?
 if [ "$FETCH_EXIT" -eq 1 ]; then
-    echo "[loop] Issue is blocked. Aborting." >&2
+    echo "[looper] Issue is blocked. Aborting." >&2
     exit 1
 fi
 if [ "$FETCH_EXIT" -eq 2 ]; then
@@ -114,16 +144,15 @@ echo "=== TDD Loop: $TASK_NAME (max 3 iterations) ==="
 echo ""
 ```
 
-Spawn doer:
+Spawn doer with properly formatted prompt (no shell variable substitution):
 ```
-Task(subagent_type="looper-doer", prompt="
-TASK_NAME: $TASK_NAME
+Task(subagent_type="looper-doer", prompt="TASK_NAME: $TASK_NAME
 SCRIPTS_DIR: $SCRIPTS_DIR
 WORKTREE_DIR: $WORKTREE_DIR
 ISSUE_BODY: $ISSUE_BODY
+ISSUE_NUMBER: $ISSUE_NUMBER
 ITERATION: 1
-MAX_TDD_ITERATIONS: 3
-")
+MAX_TDD_ITERATIONS: 3")
 ```
 
 ### 7. Run Reviewer
@@ -134,17 +163,15 @@ echo "=== Review: $TASK_NAME (max 2 rounds) ==="
 echo ""
 ```
 
-Spawn reviewer:
+Spawn reviewer with properly formatted prompt:
 ```
-Task(subagent_type="looper-reviewer", prompt="
-TASK_NAME: $TASK_NAME
+Task(subagent_type="looper-reviewer", prompt="TASK_NAME: $TASK_NAME
 SCRIPTS_DIR: $SCRIPTS_DIR
 WORKTREE_DIR: $WORKTREE_DIR
 ISSUE_BODY: $ISSUE_BODY
-LOOPER_DEV_PORT: $LOOPER_DEV_PORT
+LOOPER_DEV_PORT: ${LOOPER_DEV_PORT:-3000}
 ROUND: 1
-MAX_ROUNDS: 2
-")
+MAX_ROUNDS: 2")
 ```
 
 ### 8. Read verdict
@@ -152,30 +179,43 @@ MAX_ROUNDS: 2
 ```bash
 VERDICT=$(git log --grep="Loop-Verdict:" --all-match --format="%B" -1 2>/dev/null \
     | grep -oE 'Loop-Verdict: (PASS|FAIL)' | tail -1 | sed 's/Loop-Verdict: //' || echo "")
+echo "[looper] Verdict: $VERDICT" >&2
 ```
 
-- **PASS:** Sync and create PR
-- **FAIL:** Abort and cleanup
-
-### 9. Sync and create PR
+### 9. Handle result
 
 ```bash
-SYNC_OUTPUT=$($SCRIPTS_DIR/sync-with-remote 2>&1); eval "$SYNC_OUTPUT"
-Task(subagent_type="looper-create-github-pr", prompt="
-TASK_NAME: $TASK_NAME
+if [ "$VERDICT" = "PASS" ]; then
+    echo "[looper] Passed review, creating PR..." >&2
+
+    # Sync with remote
+    SYNC_OUTPUT=$($SCRIPTS_DIR/sync-with-remote 2>&1) || true
+    echo "$SYNC_OUTPUT" >&2
+
+    # Create PR
+    Task(subagent_type="looper-create-github-pr", prompt="TASK_NAME: $TASK_NAME
 WORKTREE_DIR: $WORKTREE_DIR
 SCRIPTS_DIR: $SCRIPTS_DIR
-")
+ISSUE_NUMBER: $ISSUE_NUMBER")
+    EXIT_CODE=$?
+elif [ "$VERDICT" = "FAIL" ]; then
+    echo "[looper] Failed review. Aborting." >&2
+    exit 1
+else
+    echo "[looper] ERROR: Could not determine verdict from commits" >&2
+    exit 1
+fi
 ```
 
 ## Escalation rules
 
 | Scenario | Action |
 |----------|--------|
-| TDD fails 3x | Orchestrator decides: re-spec, retry, or abort |
-| Reviewer fails 2x | Orchestrator decides: fix or abort |
+| TDD fails 3x | Abort with error, no retry |
+| Reviewer fails 2x | Abort with error, no retry |
 | setup-worktree fails | Abort |
 | fetch-issue-context exit 1 (blocked) | Abort |
+| sync-with-remote conflicts | Abort (manual rebase needed) |
 
 ## Rules
 
@@ -184,3 +224,4 @@ SCRIPTS_DIR: $SCRIPTS_DIR
 - **TDD is mandatory** — red before green
 - **Max 3 TDD iterations, max 2 review rounds**
 - **Abort cleanup** — worktree deleted on failure
+- **Use --unique flag** for setup-worktree to allow parallel loops
