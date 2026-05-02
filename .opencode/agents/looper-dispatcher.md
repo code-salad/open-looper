@@ -1,7 +1,7 @@
 ---
 name: looper-dispatcher
-description: Entry point for looper. Fetches ready GitHub issues and dispatches work to sandboxed looper-workers inside yolobox containers. Triggered by "/looper" followed by a task description.
-mode: orchestrator
+description: Entry point for looper. Fetches ready GitHub issues and dispatches work to sandboxed looper-workers inside isolated mngr containers. Triggered by "/looper" followed by a task description.
+mode: primary
 tools:
   bash: true
   read: true
@@ -36,9 +36,9 @@ Dispatcher
 REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
 SCRIPTS_DIR="${REPO_ROOT}/.opencode/scripts"
 
-# Verify yolobox is available
-if ! command -v yolobox >/dev/null 2>&1; then
-    echo "ERROR: yolobox not found on PATH. Install from https://github.com/finbarr/yolobox" >&2
+# Verify mngr is available (used to spawn isolated worker containers)
+if ! command -v mngr >/dev/null 2>&1; then
+    echo "ERROR: mngr not found on PATH. Install from https://github.com/imbue-ai/mngr" >&2
     exit 1
 fi
 
@@ -92,10 +92,10 @@ if [ -n "$ISSUE_NUMBER" ]; then
 fi
 ```
 
-### 3. Dispatch to worker
+### 3. Dispatch to worker via mngr
 
 ```bash
-YOLOBOX_BIN="$(command -v yolobox)"
+MNGR_BIN="$(command -v mngr)"
 
 # Build the worker task
 if [ -n "$ISSUE_NUMBER" ]; then
@@ -106,23 +106,40 @@ fi
 
 echo "[dispatcher] Dispatching worker: $WORKER_TASK" >&2
 
-# Check if yolobox is available
-if [ -n "$YOLOBOX" ] || [ ! -x "$YOLOBOX_BIN" ]; then
-    # Already inside yolobox OR yolobox not available → run worker directly
-    echo "[dispatcher] No yolobox available, running worker directly on host" >&2
-    opencode run "$WORKER_TASK"
-else
-    # Spawn worker inside yolobox container
-    REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
-    echo "[dispatcher] Spawning worker in yolobox (repo: $REPO_ROOT)" >&2
+# Spawn worker in isolated mngr container
+# This gives each worker its own Docker container with its own filesystem
+WORKER_NAME="looper-worker-${ISSUE_NUMBER:-$$}-$(date +%s)"
+REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
 
-    exec "$YOLOBOX_BIN" run \
-        --docker \
-        --gh-token \
-        --mount "$REPO_ROOT":"$REPO_ROOT" \
-        -- \
-        opencode run "$WORKER_TASK"
-fi
+echo "[dispatcher] Spawning worker in mngr container: $WORKER_NAME" >&2
+
+# Run worker via mngr create - this creates a separate container with streaming output
+# The --no-ensure-clean allows uncommitted changes (from claim) to be passed through
+"$MNGR_BIN" create "$WORKER_NAME" \
+    --provider docker \
+    --new-host \
+    --no-connect \
+    -b "$REPO_ROOT" \
+    --no-ensure-clean \
+    -- \
+    opencode serve --port 4096 &
+SERV_PID=$!
+
+# Wait for server to be ready
+sleep 8
+
+# Send task to worker
+echo "[dispatcher] Sending task to worker..." >&2
+opencode run --attach "http://localhost:4096" --continue "$WORKER_TASK" 2>&1
+
+# Capture exit code
+EXIT_CODE=$?
+
+# Cleanup server
+kill $SERV_PID 2>/dev/null || true
+
+echo "[dispatcher] Worker completed with exit code $EXIT_CODE" >&2
+exit $EXIT_CODE
 ```
 
 ## Scaling to Multiple Parallel Workers
@@ -134,7 +151,7 @@ To run multiple issues in parallel:
 READY_JSON=$($SCRIPTS_DIR/list-ready-issues --json 2>/dev/null || echo "[]")
 COUNT=$(echo "$READY_JSON" | jq 'length' 2>/dev/null || echo "0")
 
-# Spawn up to N parallel workers
+# Spawn up to N parallel workers via mngr
 MAX_PARALLEL=3
 for i in $(seq 0 $((COUNT - 1))); do
     ISSUE_OBJ=$(echo "$READY_JSON" | jq ".[$i]")
@@ -142,19 +159,30 @@ for i in $(seq 0 $((COUNT - 1))); do
     ISSUE_TITLE=$(echo "$ISSUE_OBJ" | jq -r '.title')
 
     # Claim first
-    "$SCRIPTS_DIR/claim-issue" --issue "$ISSUE_NUM" >/dev/null 2>&1 && {
-        # Spawn in background yolobox
-        "$YOLOBOX_BIN" run \
-            --docker --gh-token \
-            --mount "$REPO_ROOT":"$REPO_ROOT" \
-            -- \
-            opencode run "/looper-worker #${ISSUE_NUM} ${ISSUE_TITLE}" &
-    }
+    if "$SCRIPTS_DIR/claim-issue" --issue "$ISSUE_NUM" >/dev/null 2>&1; then
+        WORKER_NAME="looper-worker-${ISSUE_NUM}-$(date +%s)"
 
-    # Limit parallelism
-    while [ $(jobs -r | wc -l) -ge "$MAX_PARALLEL" ]; do
-        sleep 5
-    done
+        # Spawn in background mngr container
+        "$MNGR_BIN" create "$WORKER_NAME" \
+            --provider docker \
+            --new-host \
+            --no-connect \
+            -b "$REPO_ROOT" \
+            --no-ensure-clean \
+            -- \
+            opencode serve --port 4096 &
+        SERV_PID=$!
+
+        sleep 8
+
+        # Send task
+        opencode run --attach "http://localhost:4096" --continue "/looper-worker #${ISSUE_NUM} ${ISSUE_TITLE}" &
+
+        # Limit parallelism
+        while [ $(jobs -r | wc -l) -ge "$MAX_PARALLEL" ]; do
+            sleep 5
+        done
+    fi
 done
 
 # Wait for all workers
@@ -166,6 +194,7 @@ echo "[dispatcher] All workers complete."
 
 - **Dispatcher is the entry point** — `/looper` invokes this, not looper-worker directly
 - **Never does TDD work** — only claims and dispatches
-- **One issue per dispatch** — each yolobox container handles one issue
+- **One issue per dispatch** — each mngr container handles one issue
 - **Uses `--unique` via worker** — worker calls setup-clone --unique so clones don't conflict
-- **Parallel-safe** — multiple dispatchers can run concurrently if they claim different issues
+- **Parallel-safe** — multiple dispatchers can run concurrently on different issues
+- **Isolation via mngr** — each worker gets its own Docker container (separate filesystem, process space)
