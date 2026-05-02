@@ -18,10 +18,7 @@ cd open-looper
 │   ├── doer.md
 │   ├── checker.md
 │   └── */            # Helper agents
-└── skills/
-    └── looper/
-        ├── SKILL.md  # Skill definition
-        └── scripts/  # Bash helper scripts
+└── scripts/          # Bash helper scripts
 ```
 
 ## Making Changes
@@ -41,8 +38,8 @@ Edit `.opencode/skills/looper/SKILL.md` to change loop orchestration.
 
 ### Scripts
 
-Scripts in `.opencode/skills/looper/scripts/` handle:
-- `setup-worktree` — create/resume worktrees
+Scripts in `.opencode/scripts/` handle:
+- `setup-clone` — create isolated clones (branch-only, no master access)
 - `git-commit-loop` — create commits with loop trailers
 - `detect-stack` — detect project tech stack
 - `run-tests`, `run-lint`, etc. — quality checks
@@ -61,7 +58,7 @@ git log --grep="Loop-Phase:" --oneline
 
 ## Guidelines
 
-- Agents spawn subagents via `claude-spawn-agent` Bash command, not inline execution
-- All work happens in worktrees, never on default branch
+- Agents spawn subagents via `Task` tool, not inline execution
+- All work happens in isolated clones, never on default branch
 - Use conventional commits with loop trailers
 - Test changes before committing

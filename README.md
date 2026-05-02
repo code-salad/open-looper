@@ -12,7 +12,7 @@ open-looper provides an automated development cycle:
 3. **Check** — Review work and issue PASS/FAIL verdict
 4. **Repeat** — On FAIL, iterate with feedback until PASS
 
-Uses git worktrees for isolated development and produces conventional commits with full audit trail.
+Uses isolated git clones for sandboxed development and produces conventional commits with full audit trail.
 
 ## Quick Start
 
@@ -41,10 +41,7 @@ The skill triggers on `/looper <task>` and orchestrates the PDC loop.
 │   ├── doer.md        # Implements via TDD
 │   ├── checker.md     # Issues PASS/FAIL verdict
 │   └── */             # Helper agents (debugger, simplifier, etc.)
-└── skills/
-    └── looper/
-        ├── SKILL.md   # PDC loop orchestration skill
-        └── scripts/   # Helper scripts (setup-worktree, git-commit-loop, etc.)
+└── scripts/          # Helper scripts (setup-clone, git-commit-loop, etc.)
 ```
 
 ## Agents
@@ -61,7 +58,7 @@ The skill triggers on `/looper <task>` and orchestrates the PDC loop.
 
 ## Key Features
 
-- **Worktree isolation** — Each task runs in `.worktrees/<task>/`
+- **Clone isolation** — Each task runs in `.clones/<task>/` with only the work branch (no access to master)
 - **TDD enforcement** — Red phase (tests) must commit before green (implementation)
 - **Resume support** — Pick up interrupted loops from last iteration
 - **Conventional commits** — Full audit trail with `Loop-Phase:`, `Loop-Iteration:`, `Loop-Verdict:` trailers

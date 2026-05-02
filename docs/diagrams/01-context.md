@@ -12,7 +12,7 @@ C4Context
 
   System(looper, "Open-Looper", "AI-powered Plan-Do-Check loop orchestration system")
   System_Ext(scripts, "Scripts", ".opencode/scripts - Bash scripts for automation and integration")
-  System_Ext(worktrees, "Worktrees", ".worktrees/ - Isolated git worktrees for parallel development")
+  System_Ext(clones, "Clones", ".clones/ - Isolated git clones for sandboxed development")
 
   Rel(user, github, "Creates issues, reviews PRs", "gh CLI")
   Rel(user, opencode, "Invokes via plugin API", "OpenCode plugin interface")
@@ -21,11 +21,11 @@ C4Context
   Rel(looper, docker, "Spawns containers for execution", "Docker API")
   Rel(looper, opencode, "Runs as plugin within host", "Plugin protocol")
   Rel(looper, scripts, "Executes via bash", "Shell commands")
-  Rel(looper, worktrees, "Creates and manages worktrees", "Git worktree commands")
+  Rel(looper, clones, "Creates and manages isolated clones", "Git clone commands")
 
   Rel(scripts, github, "CI/CD integration", "gh/webhooks")
   Rel(scripts, docker, "Container management", "docker CLI")
-  Rel(worktrees, github, "Linked to remotes", "git push/fetch")
+  Rel(clones, github, "Linked to remotes", "git push/fetch")
 
   ShowLegend()
 ```

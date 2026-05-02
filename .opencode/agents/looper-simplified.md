@@ -1,6 +1,6 @@
 ---
 name: looper
-description: Orchestrates a simplified loop: pull issue, create worktree, run TDD, review, merge. Triggered by "/looper" followed by a task description.
+description: Orchestrates a simplified loop: pull issue, create isolated clone, run TDD, review, merge. Triggered by "/looper" followed by a task description.
 tools:
   bash: true
   read: true
@@ -19,7 +19,7 @@ Single orchestrator managing the full PDC loop. No planner — the GitHub issue 
 Orchestrator
   ├── Validate environment
   ├── Parse task / auto-select issue
-  ├── Create worktree
+  ├── Create isolated clone (clones only work branch from origin)
   ├── TDD Loop (Doer subagent, max 3 iterations)
   │     └── red → green → refactor
   ├── Reviewer Loop (max 2 rounds)
@@ -27,6 +27,8 @@ Orchestrator
   ├── Pass → Sync & create PR
   └── Fail → Abort & cleanup
 ```
+
+**Isolation guarantee:** Clone has only `loop/<task>` branch — agent cannot reach master.
 
 ## Steps
 
@@ -41,7 +43,7 @@ if [ ! -d "$SCRIPTS_DIR" ]; then
 fi
 
 # Verify required scripts exist
-for script in setup-worktree fetch-issue-context git-commit-loop; do
+for script in setup-clone fetch-issue-context git-commit-loop; do
     if [ ! -x "$SCRIPTS_DIR/$script" ]; then
         echo "ERROR: required script $script not found or not executable" >&2
         exit 1
@@ -92,27 +94,30 @@ TASK_NAME=${TASK_NAME##-}
 [ -z "$TASK_NAME" ] && TASK_NAME="task-$(date +%Y%m%d-%H%M%S)"
 ```
 
-### 4. Create worktree
+### 4. Create isolated clone
 
 ```bash
-WORKTREE_DIR=$($SCRIPTS_DIR/setup-worktree --task "$TASK_NAME" --unique 2>&1)
+CLONE_DIR=$($SCRIPTS_DIR/setup-clone --task "$TASK_NAME" --unique 2>&1)
 SETUP_EXIT=$?
-if [ "$SETUP_EXIT" -ne 0 ] || [ -z "$WORKTREE_DIR" ]; then
-    echo "ERROR: setup-worktree failed. Aborting." >&2
+if [ "$SETUP_EXIT" -ne 0 ] || [ -z "$CLONE_DIR" ]; then
+    echo "ERROR: setup-clone failed. Aborting." >&2
     exit 1
 fi
-cd "$WORKTREE_DIR"
-echo "[looper] Worktree: $WORKTREE_DIR" >&2
+cd "$CLONE_DIR"
+echo "[looper] Isolated clone: $CLONE_DIR" >&2
+
+# Verify isolation
+BRANCH_COUNT=$(git branch -a | wc -l)
+echo "[looper] Clone has $BRANCH_COUNT branch(es) — should be 1-2 (local + remote)" >&2
 ```
 
 **Abort cleanup trap:**
 ```bash
 cleanup_on_abort() {
     local exit_code=$?
-    if [ -n "$WORKTREE_DIR" ] && [ -d "$WORKTREE_DIR" ]; then
-        echo "[looper] Cleaning up worktree on abort..." >&2
-        REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || echo "")
-        [ -n "$REPO_ROOT" ] && "$SCRIPTS_DIR/cleanup-worktree" --dir "$WORKTREE_DIR" 2>/dev/null || true
+    if [ -n "$CLONE_DIR" ] && [ -d "$CLONE_DIR" ]; then
+        echo "[looper] Cleaning up clone on abort..." >&2
+        "$SCRIPTS_DIR/cleanup-clone" --dir "$CLONE_DIR" 2>/dev/null || true
     fi
     exit $exit_code
 }
@@ -148,7 +153,7 @@ Spawn doer with properly formatted prompt (no shell variable substitution):
 ```
 Task(subagent_type="looper-doer", prompt="TASK_NAME: $TASK_NAME
 SCRIPTS_DIR: $SCRIPTS_DIR
-WORKTREE_DIR: $WORKTREE_DIR
+CLONE_DIR: $CLONE_DIR
 ISSUE_BODY: $ISSUE_BODY
 ISSUE_NUMBER: $ISSUE_NUMBER
 ITERATION: 1
@@ -167,7 +172,7 @@ Spawn reviewer with properly formatted prompt:
 ```
 Task(subagent_type="looper-reviewer", prompt="TASK_NAME: $TASK_NAME
 SCRIPTS_DIR: $SCRIPTS_DIR
-WORKTREE_DIR: $WORKTREE_DIR
+CLONE_DIR: $CLONE_DIR
 ISSUE_BODY: $ISSUE_BODY
 LOOPER_DEV_PORT: ${LOOPER_DEV_PORT:-3000}
 ROUND: 1
@@ -177,6 +182,7 @@ MAX_ROUNDS: 2")
 ### 8. Read verdict
 
 ```bash
+cd "$CLONE_DIR"
 VERDICT=$(git log --grep="Loop-Verdict:" --all-match --format="%B" -1 2>/dev/null \
     | grep -oE 'Loop-Verdict: (PASS|FAIL)' | tail -1 | sed 's/Loop-Verdict: //' || echo "")
 echo "[looper] Verdict: $VERDICT" >&2
@@ -194,7 +200,7 @@ if [ "$VERDICT" = "PASS" ]; then
 
     # Create PR
     Task(subagent_type="looper-create-github-pr", prompt="TASK_NAME: $TASK_NAME
-WORKTREE_DIR: $WORKTREE_DIR
+CLONE_DIR: $CLONE_DIR
 SCRIPTS_DIR: $SCRIPTS_DIR
 ISSUE_NUMBER: $ISSUE_NUMBER")
     EXIT_CODE=$?
@@ -213,7 +219,7 @@ fi
 |----------|--------|
 | TDD fails 3x | Abort with error, no retry |
 | Reviewer fails 2x | Abort with error, no retry |
-| setup-worktree fails | Abort |
+| setup-clone fails | Abort |
 | fetch-issue-context exit 1 (blocked) | Abort |
 | sync-with-remote conflicts | Abort (manual rebase needed) |
 
@@ -223,5 +229,6 @@ fi
 - **Issue IS the spec** — no planner needed
 - **TDD is mandatory** — red before green
 - **Max 3 TDD iterations, max 2 review rounds**
-- **Abort cleanup** — worktree deleted on failure
-- **Use --unique flag** for setup-worktree to allow parallel loops
+- **Abort cleanup** — clone deleted on failure
+- **Use --unique flag** for setup-clone to allow parallel loops
+- **Isolation guarantee** — clone has only `loop/<task>` branch; cannot reach master

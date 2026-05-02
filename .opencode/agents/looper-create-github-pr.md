@@ -393,17 +393,17 @@ fi
 
 If the squash merge fails (e.g., merge conflicts, branch protection rules), report the error and do NOT retry.
 
-### 6b. Clean up worktree
+### 6b. Clean up clone
 
-If the `$WORKTREE_DIR` variable is set (indicating this PR was created from a looper worktree), remove the worktree after a successful merge:
+If the `$CLONE_DIR` variable is set (indicating this PR was created from a looper clone), remove the clone after a successful merge:
 
 ```bash
 REPO_ROOT=$(git rev-parse --show-toplevel)
 SCRIPTS_DIR="${REPO_ROOT}/.opencode/scripts"
-"$SCRIPTS_DIR/cleanup-worktree" --dir "$WORKTREE_DIR"
+"$SCRIPTS_DIR/cleanup-clone" --dir "$CLONE_DIR"
 ```
 
-If worktree removal fails, warn but do not abort.
+If clone removal fails, warn but do not abort.
 
 ### 6c. Report final status
 

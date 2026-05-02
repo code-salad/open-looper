@@ -1,0 +1,118 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# setup-clone — Create isolated clone for looper agent
+# Usage: setup-clone --task <name> [--unique]
+# Outputs the absolute clone path to stdout.
+# Warnings/info go to stderr.
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/_helpers.sh"
+
+TASK=""
+UNIQUE=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --task) TASK="$2"; shift 2 ;;
+        --unique) UNIQUE="yes"; shift ;;
+        *) echo "Unknown option: $1" >&2; exit 1 ;;
+    esac
+done
+
+if [ -z "$TASK" ]; then
+    echo "Usage: setup-clone --task <name> [--unique]" >&2
+    exit 1
+fi
+
+REPO_ROOT=$(git rev-parse --show-toplevel)
+CLONE_DIR="$REPO_ROOT/.clones/$TASK"
+BRANCH="loop/$TASK"
+
+# If --unique, append timestamp and short UUID to isolate each run
+if [ "$UNIQUE" = "yes" ]; then
+    TS=$(date +%Y%m%d-%H%M%S)
+    UUID=$(uuidgen 2>/dev/null | head -c 8 \
+        || cat /proc/sys/kernel/random/uuid 2>/dev/null | head -c 8 \
+        || openssl rand -hex 4 2>/dev/null \
+        || printf "%08x" "$RANDOM$(date +%s%N)")
+    CLONE_DIR="$CLONE_DIR-$TS-$UUID"
+    BRANCH="loop/$TASK-$UUID"
+fi
+
+# Ensure .clones is gitignored
+GITIGNORE="$REPO_ROOT/.gitignore"
+if ! [ -f "$GITIGNORE" ] || ! grep -qxF '.clones' "$GITIGNORE"; then
+    if [ -f "$GITIGNORE" ] && [ -s "$GITIGNORE" ]; then
+        if [ "$(tail -c 1 "$GITIGNORE" | wc -l)" -eq 0 ]; then
+            echo "" >> "$GITIGNORE"
+        fi
+    fi
+    echo '.clones' >> "$GITIGNORE"
+    git -C "$REPO_ROOT" add -- .gitignore
+    git -C "$REPO_ROOT" diff --cached --quiet || \
+        git -C "$REPO_ROOT" commit -m "chore: gitignore .clones" >/dev/null 2>&1
+    echo "[setup-clone] Added .clones to .gitignore" >&2
+fi
+
+ORIGIN_URL=$(git remote get-url origin 2>/dev/null || echo "")
+if [ -z "$ORIGIN_URL" ]; then
+    echo "[setup-clone] ERROR: no origin remote found" >&2
+    exit 1
+fi
+
+# Detect default branch
+DEFAULT_BRANCH=""
+git fetch origin 2>/dev/null || true
+DEFAULT_BRANCH=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null \
+    | sed 's@^refs/remotes/origin/@@' || true)
+if [ -z "$DEFAULT_BRANCH" ]; then
+    for candidate in main master alpha dev; do
+        if git show-ref --quiet "refs/remotes/origin/$candidate"; then
+            DEFAULT_BRANCH="$candidate"
+            break
+        fi
+    done
+fi
+
+if [ -z "$DEFAULT_BRANCH" ]; then
+    echo "[setup-clone] ERROR: could not detect default branch" >&2
+    exit 1
+fi
+
+# Create or reuse clone
+if [ -d "$CLONE_DIR" ]; then
+    if [ -d "$CLONE_DIR/.git" ]; then
+        echo "[setup-clone] Clone already exists, resuming" >&2
+    else
+        echo "[setup-clone] ERROR: $CLONE_DIR exists but is not a git clone" >&2
+        exit 1
+    fi
+else
+    # Create branch from origin's default branch
+    echo "[setup-clone] Creating branch $BRANCH from origin/$DEFAULT_BRANCH" >&2
+
+    git branch "$BRANCH" "origin/$DEFAULT_BRANCH" 2>/dev/null || \
+        git branch "$BRANCH" "$DEFAULT_BRANCH" 2>/dev/null || \
+        git branch "$BRANCH" HEAD
+
+    # Immediately push to origin — this is the key isolation step
+    # Agents clone from origin, not from local, so they can't reach local refs
+    echo "[setup-clone] Pushing branch to origin..." >&2
+    git push -u origin "$BRANCH" 2>/dev/null || \
+        echo "[setup-clone] Warning: could not push to origin (may be normal for forks)" >&2
+
+    # Create shallow clone of only this branch
+    echo "[setup-clone] Cloning into $CLONE_DIR..." >&2
+    mkdir -p "$(dirname "$CLONE_DIR")"
+    git clone --branch "$BRANCH" --depth 1 "$ORIGIN_URL" "$CLONE_DIR"
+
+    echo "[setup-clone] Created isolated clone at $CLONE_DIR" >&2
+fi
+
+# Verify isolation — clone should only have one branch
+CLONE_BRANCHES=$(git -C "$CLONE_DIR" branch -a 2>/dev/null | wc -l)
+echo "[setup-clone] Clone has $CLONE_BRANCHES branch(es)" >&2
+
+# Output the path
+echo "$CLONE_DIR"
