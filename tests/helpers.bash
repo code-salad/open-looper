@@ -21,15 +21,18 @@ setup_fixture_repo() {
     git -C "$FIXTURE_REPO" config user.email "test@example.com"
     git -C "$FIXTURE_REPO" config user.name "Test User"
 
-    # Create an initial commit
+    # Create main branch with an initial commit
     touch "$FIXTURE_REPO/README"
     git -C "$FIXTURE_REPO" add README
     git -C "$FIXTURE_REPO" commit -q -m "init"
+    git -C "$FIXTURE_REPO" branch -m main
 
-    # Create an origin remote so DEFAULT_REMOTE_BRANCH detection works
-    mkdir -p "$FIXTURE_REPO/.git/refs/remotes/origin"
-    echo "refs/heads/main" > "$FIXTURE_REPO/.git/refs/remotes/origin/HEAD"
+    # Create origin remote pointing to itself
     git -C "$FIXTURE_REPO" remote add origin "file://$FIXTURE_REPO/.git" 2>/dev/null || true
+
+    # Create proper refs/remotes/origin/HEAD symbolic ref
+    git -C "$FIXTURE_REPO" symbolic-ref "refs/remotes/origin/HEAD" "refs/remotes/origin/main" 2>/dev/null || true
+    git -C "$FIXTURE_REPO" update-ref "refs/remotes/origin/main" HEAD 2>/dev/null || true
   fi
 }
 
