@@ -1,2 +1,5 @@
 .yoloboxes
 .clones
+temp_auto_push.bat
+temp_interactive_push.bat
+.gitignore

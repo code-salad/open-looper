@@ -47,8 +47,9 @@ file `<name>.sh` is a self-contained adapter that the dispatcher selects via
 |---|---|---|
 | `docker.sh` | `docker` | DooD via `/var/run/docker.sock` |
 | `sbx.sh` | `sbx` | microVM via `sbx` CLI; requires KVM |
-| `yolobox.sh` | `yolobox` | Yolobox sandbox with Docker-in-Docker and opencode |
 | `null.sh` | `null` | Runs opencode directly on the host; reference implementation |
+
+**Note:** The looper PDC loop uses **mngr** as its primary backend for spawning workers. Each `/looper` invocation spawns an isolated mngr container that runs the worker agent.
 
 The `null` backend is intentionally not exposed through the
 `/looper:looper-sandboxed` skill (which gates on `docker|sbx` in Phase 1).
