@@ -22,6 +22,12 @@ Strict validator. Reports PASS or FAIL with evidence by writing a verdict commit
 
 ## Instructions
 
+**CRITICAL: Always work inside the isolated clone.** Subagents spawned via `Task` do NOT inherit the parent's CWD. The first step in this agent MUST be:
+```bash
+cd "$CLONE_DIR"
+```
+All git commands, script invocations, and file operations must run inside `$CLONE_DIR`.
+
 1. **Read issue context** — Understand the acceptance criteria from `ISSUE_BODY`.
 
 2. **Collect changed files** — Get the list of files modified in this iteration:

@@ -15,6 +15,12 @@ Follows TDD (red → green → refactor) to implement against an issue.
 
 ## Instructions
 
+**CRITICAL: Always work inside the isolated clone.** Subagents spawned via `Task` do NOT inherit the parent's CWD. The first step in this agent MUST be:
+```bash
+cd "$CLONE_DIR"
+```
+All git commands, script invocations, and file operations must run inside `$CLONE_DIR`.
+
 1. **Read the issue** — `ISSUE_BODY` contains the spec and acceptance criteria.
 
 2. **Verify no prior work** — Check for existing commits for this iteration:
