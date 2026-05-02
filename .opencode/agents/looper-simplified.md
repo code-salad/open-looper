@@ -118,7 +118,7 @@ echo "[looper] Clone has $BRANCH_COUNT branch(es) — should be 1-2 (local + rem
 ABORTING="no"
 cleanup_on_abort() {
     local exit_code=$?
-    if [ -n "$CLONE_DIR" ] && [ -d "$CLONE_DIR" ]; then
+    if [ "$ABORTING" = "yes" ] && [ -n "$CLONE_DIR" ] && [ -d "$CLONE_DIR" ]; then
         echo "[looper] Cleaning up clone on abort..." >&2
         "$SCRIPTS_DIR/cleanup-clone" --dir "$CLONE_DIR" 2>/dev/null || true
     fi
