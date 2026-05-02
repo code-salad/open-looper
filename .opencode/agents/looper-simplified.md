@@ -230,7 +230,7 @@ MAX_ROUNDS: $MAX_ROUNDS") 2>&1) && REVIEW_EXIT=0 || REVIEW_EXIT=$?
 
     # Read verdict from reviewer commit (written via git-commit-loop with --verdict)
     cd "$CLONE_DIR"
-    VERDICT=$(git log --grep="Loop-Verdict:" --all-match --format="%B" -1 2>/dev/null \
+    VERDICT=$(git log --grep="Loop-Verdict:" --format="%B" -1 2>/dev/null \
         | grep -oE 'Loop-Verdict: (PASS|FAIL)' | tail -1 | sed 's/Loop-Verdict: //' || echo "")
 
     echo "[looper] Round $ROUND verdict: $VERDICT" >&2
