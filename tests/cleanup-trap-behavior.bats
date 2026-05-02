@@ -13,8 +13,20 @@ load 'helpers.bash'
   TEST_CLONE="$FIXTURE_REPO/.clones/test-abort"
   mkdir -p "$TEST_CLONE/.git"
 
-  # Run a sub-script that sets trap and exits with error
-  run bash -c "CLONE_DIR='$TEST_CLONE'; trap 'rm -rf \"\$CLONE_DIR\"' EXIT; exit 1"
+  # Run a sub-script that sets trap conditionally and exits with error
+  run bash -c "
+    CLONE_DIR='$TEST_CLONE'
+    ABORTING='yes'
+    cleanup_on_abort() {
+      if [ -n \"\$CLONE_DIR\" ] && [ -d \"\$CLONE_DIR\" ]; then
+        rm -rf \"\$CLONE_DIR\"
+      fi
+    }
+    if [ \"\$ABORTING\" = 'yes' ]; then
+      trap cleanup_on_abort EXIT
+    fi
+    exit 1
+  "
   echo "Status: $status, output: $output"
 
   [ "$status" -eq 1 ]
@@ -22,32 +34,58 @@ load 'helpers.bash'
   [ ! -d "$TEST_CLONE" ]
 }
 
-# --- Test 2: trap does NOT fire on successful exit ---
-@test "cleanup_on_abort trap does NOT fire on successful exit" {
+# --- Test 2: fixed behavior - trap does NOT fire on successful exit ---
+@test "cleanup_on_abort trap does NOT fire on successful exit (FIXED)" {
   cd "$FIXTURE_REPO"
 
   # Create a test clone directory
   TEST_CLONE="$FIXTURE_REPO/.clones/test-success"
   mkdir -p "$TEST_CLONE/.git"
 
-  # Run a sub-script that sets trap and exits successfully
-  run bash -c "CLONE_DIR='$TEST_CLONE'; trap 'rm -rf \"\$CLONE_DIR\"' EXIT; exit 0"
+  # Run a sub-script that simulates FIXED looper behavior
+  # trap is NOT set because ABORTING='no'
+  run bash -c "
+    CLONE_DIR='$TEST_CLONE'
+    ABORTING='no'
+    cleanup_on_abort() {
+      if [ -n \"\$CLONE_DIR\" ] && [ -d \"\$CLONE_DIR\" ]; then
+        rm -rf \"\$CLONE_DIR\"
+      fi
+    }
+    if [ \"\$ABORTING\" = 'yes' ]; then
+      trap cleanup_on_abort EXIT
+    fi
+    exit 0
+  "
   echo "Status: $status, output: $output"
 
   [ "$status" -eq 0 ]
-  # Clone should still exist because trap did NOT fire on success
+  # Clone should still exist because trap was NOT set (ABORTING=no)
   [ -d "$TEST_CLONE" ]
 }
 
-# --- Test 3: trap fires on abort (simulating line 209) ---
+# --- Test 3: trap fires on abort (simulating line 209-215) ---
 @test "cleanup_on_abort trap fires on abort exit" {
   cd "$FIXTURE_REPO"
 
   TEST_CLONE="$FIXTURE_REPO/.clones/test-line209"
   mkdir -p "$TEST_CLONE/.git"
 
-  # Simulate line 209: exit 1 on FAIL verdict
-  run bash -c "CLONE_DIR='$TEST_CLONE'; trap 'rm -rf \"\$CLONE_DIR\"' EXIT; echo '[looper] Failed review. Aborting.' >&2; exit 1"
+  # Simulate line 209-215: exit 1 on FAIL verdict with trap set
+  run bash -c "
+    CLONE_DIR='$TEST_CLONE'
+    ABORTING='yes'
+    cleanup_on_abort() {
+      if [ -n \"\$CLONE_DIR\" ] && [ -d \"\$CLONE_DIR\" ]; then
+        rm -rf \"\$CLONE_DIR\"
+      fi
+    }
+    if [ \"\$ABORTING\" = 'yes' ]; then
+      trap cleanup_on_abort EXIT
+    fi
+    echo '[looper] Failed review. Aborting.' >&2
+    exit 1
+  "
   echo "Status: $status, output: $output"
 
   [ "$status" -eq 1 ]
@@ -63,53 +101,9 @@ load 'helpers.bash'
   mkdir -p "$TEST_CLONE/.git"
 
   # Simulate: clear CLONE_DIR before exiting successfully
-  run bash -c "CLONE_DIR='$TEST_CLONE'; trap 'rm -rf \"\$CLONE_DIR\"' EXIT; echo '[looper] Passed review, creating PR...' >&2; CLONE_DIR=''; exit 0"
-  echo "Status: $status, output: $output"
-
-  [ "$status" -eq 0 ]
-  # Clone should still exist because CLONE_DIR was cleared before exit
-  [ -d "$TEST_CLONE" ]
-}
-
-# --- Test 5: current behavior BUG - trap fires on success with current code ---
-@test "BUG REPRO: current trap fires even on successful exit" {
-  cd "$FIXTURE_REPO"
-
-  TEST_CLONE="$FIXTURE_REPO/.clones/test-bug"
-  mkdir -p "$TEST_CLONE/.git"
-
-  # This simulates the CURRENT broken behavior from looper-simplified.md
-  # where trap cleanup_on_abort EXIT fires on ANY exit including success
   run bash -c "
     CLONE_DIR='$TEST_CLONE'
-    cleanup_on_abort() {
-      if [ -n \"\$CLONE_DIR\" ] && [ -d \"\$CLONE_DIR\" ]; then
-        rm -rf \"\$CLONE_DIR\"
-      fi
-    }
-    trap cleanup_on_abort EXIT
-    exit 0
-  "
-  echo "Status: $status, output: $output"
-
-  [ "$status" -eq 0 ]
-  # BUG: Clone gets deleted even though exit was successful!
-  # With current code, this passes but clone is incorrectly deleted
-  # This test documents the bug - after fix, clone should still exist
-  [ -d "$TEST_CLONE" ]
-}
-
-# --- Test 6: fix verification - conditional trap only on error path ---
-@test "fix: conditional trap does not fire on successful exit" {
-  cd "$FIXTURE_REPO"
-
-  TEST_CLONE="$FIXTURE_REPO/.clones/test-fix"
-  mkdir -p "$TEST_CLONE/.git"
-
-  # Simulate FIXED behavior: trap only set in error path
-  run bash -c "
-    CLONE_DIR='$TEST_CLONE'
-    ABORTING='no'  # Simulates successful path
+    ABORTING='no'
     cleanup_on_abort() {
       if [ -n \"\$CLONE_DIR\" ] && [ -d \"\$CLONE_DIR\" ]; then
         rm -rf \"\$CLONE_DIR\"
@@ -118,7 +112,40 @@ load 'helpers.bash'
     if [ \"\$ABORTING\" = 'yes' ]; then
       trap cleanup_on_abort EXIT
     fi
+    echo '[looper] Passed review, creating PR...' >&2
+    CLONE_DIR=''
+    exit 0
+  "
+  echo "Status: $status, output: $output"
+
+  [ "$status" -eq 0 ]
+  # Clone should still exist because CLONE_DIR was cleared before exit
+  [ -d "$TEST_CLONE" ]
+}
+
+# --- Test 5: FIXED behavior - no trap set on success path ---
+@test "FIXED: no trap set means no cleanup on successful exit" {
+  cd "$FIXTURE_REPO"
+
+  TEST_CLONE="$FIXTURE_REPO/.clones/test-fix-success"
+  mkdir -p "$TEST_CLONE/.git"
+
+  # Simulates FIXED looper-simplified.md behavior
+  # trap is ONLY set in abort path, not on success
+  run bash -c "
+    CLONE_DIR='$TEST_CLONE'
+    ABORTING='no'  # Success path
+    cleanup_on_abort() {
+      if [ -n \"\$CLONE_DIR\" ] && [ -d \"\$CLONE_DIR\" ]; then
+        echo '[cleanup] Removing clone on abort...' >&2
+        rm -rf \"\$CLONE_DIR\"
+      fi
+    }
+    if [ \"\$ABORTING\" = 'yes' ]; then
+      trap cleanup_on_abort EXIT
+    fi
     # Simulate successful PR creation
+    echo '[looper] Passed review, creating PR...' >&2
     exit 0
   "
   echo "Status: $status, output: $output"
@@ -128,7 +155,7 @@ load 'helpers.bash'
   [ -d "$TEST_CLONE" ]
 }
 
-# --- Test 7: fix verification - trap fires when ABORTING=yes ---
+# --- Test 6: trap fires when ABORTING=yes ---
 @test "fix: conditional trap fires when ABORTING=yes" {
   cd "$FIXTURE_REPO"
 
@@ -138,7 +165,7 @@ load 'helpers.bash'
   # Simulate FIXED behavior: trap only set when aborting
   run bash -c "
     CLONE_DIR='$TEST_CLONE'
-    ABORTING='yes'  # Simulates abort path
+    ABORTING='yes'  # Abort path
     cleanup_on_abort() {
       if [ -n \"\$CLONE_DIR\" ] && [ -d \"\$CLONE_DIR\" ]; then
         rm -rf \"\$CLONE_DIR\"
@@ -154,5 +181,33 @@ load 'helpers.bash'
 
   [ "$status" -eq 1 ]
   # Clone should be deleted because trap was set and exit was error
+  [ ! -d "$TEST_CLONE" ]
+}
+
+# --- Test 7: multiple abort points work correctly ---
+@test "trap fires correctly for setup-clone failure" {
+  cd "$FIXTURE_REPO"
+
+  TEST_CLONE="$FIXTURE_REPO/.clones/test-setup-fail"
+  mkdir -p "$TEST_CLONE/.git"
+
+  # Simulate setup-clone failure at line 102-104
+  run bash -c "
+    CLONE_DIR='$TEST_CLONE'
+    ABORTING='yes'
+    cleanup_on_abort() {
+      if [ -n \"\$CLONE_DIR\" ] && [ -d \"\$CLONE_DIR\" ]; then
+        rm -rf \"\$CLONE_DIR\"
+      fi
+    }
+    if [ \"\$ABORTING\" = 'yes' ]; then
+      trap cleanup_on_abort EXIT
+    fi
+    echo 'ERROR: setup-clone failed. Aborting.' >&2
+    exit 1
+  "
+  echo "Status: $status, output: $output"
+
+  [ "$status" -eq 1 ]
   [ ! -d "$TEST_CLONE" ]
 }

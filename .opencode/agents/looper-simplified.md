@@ -101,6 +101,8 @@ CLONE_DIR=$($SCRIPTS_DIR/setup-clone --task "$TASK_NAME" --unique 2>&1)
 SETUP_EXIT=$?
 if [ "$SETUP_EXIT" -ne 0 ] || [ -z "$CLONE_DIR" ]; then
     echo "ERROR: setup-clone failed. Aborting." >&2
+    ABORTING="yes"
+    trap cleanup_on_abort EXIT
     exit 1
 fi
 cd "$CLONE_DIR"
@@ -113,6 +115,7 @@ echo "[looper] Clone has $BRANCH_COUNT branch(es) — should be 1-2 (local + rem
 
 **Abort cleanup trap:**
 ```bash
+ABORTING="no"
 cleanup_on_abort() {
     local exit_code=$?
     if [ -n "$CLONE_DIR" ] && [ -d "$CLONE_DIR" ]; then
@@ -121,7 +124,6 @@ cleanup_on_abort() {
     fi
     exit $exit_code
 }
-trap cleanup_on_abort EXIT
 ```
 
 ### 5. Fetch issue context
@@ -130,6 +132,8 @@ trap cleanup_on_abort EXIT
 FETCH_OUTPUT=$($SCRIPTS_DIR/fetch-issue-context --args "$TASK_ARG" 2>&1); FETCH_EXIT=$?
 if [ "$FETCH_EXIT" -eq 1 ]; then
     echo "[looper] Issue is blocked. Aborting." >&2
+    ABORTING="yes"
+    trap cleanup_on_abort EXIT
     exit 1
 fi
 if [ "$FETCH_EXIT" -eq 2 ]; then
@@ -206,9 +210,13 @@ ISSUE_NUMBER: $ISSUE_NUMBER")
     EXIT_CODE=$?
 elif [ "$VERDICT" = "FAIL" ]; then
     echo "[looper] Failed review. Aborting." >&2
+    ABORTING="yes"
+    trap cleanup_on_abort EXIT
     exit 1
 else
     echo "[looper] ERROR: Could not determine verdict from commits" >&2
+    ABORTING="yes"
+    trap cleanup_on_abort EXIT
     exit 1
 fi
 ```
