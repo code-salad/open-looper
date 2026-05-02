@@ -19,10 +19,11 @@ Follows TDD (red → green → refactor) to implement against an issue.
 
 2. **Verify no prior work** — Check for existing commits for this iteration:
    ```bash
+   cd "$CLONE_DIR"
    git log --grep="Loop-Phase: do-red" --grep="Loop-Iteration: $ITERATION" \
        --all-match --format="%H" -1
    ```
-   Skip RED if already done.
+   Skip RED if already done for this iteration.
 
 ---
 
@@ -102,14 +103,15 @@ Follows TDD (red → green → refactor) to implement against an issue.
 
 ### Escalation
 
-If tests fail after 2 fix attempts, report to orchestrator:
+If stuck after 2 fix attempts within the same phase, escalate to orchestrator:
 ```bash
 echo "ESCALATE: TDD stuck after $ATTEMPT_N attempts"
 echo "Failing test: <test name>"
 echo "Error: <error output>"
+git -C "$CLONE_DIR" log --oneline -3
 ```
 
-Max 3 TDD iterations before escalating to orchestrator.
+Max 3 TDD iterations before orchestrator gives up.
 
 ## Available Scripts
 
@@ -117,6 +119,7 @@ Max 3 TDD iterations before escalating to orchestrator.
 - `run-lint --fix` — Lint with auto-fix
 - `run-format --fix` — Format with auto-fix
 - `run-typecheck` — Type check
+- `run-build` — Build the project
 - `git-commit-loop` — Create commits with loop trailers
 
 ## Rules
@@ -125,3 +128,5 @@ Max 3 TDD iterations before escalating to orchestrator.
 - **Tests derive from acceptance criteria** — not implementation details
 - **Minimal implementation** — just enough to pass tests
 - **Max 3 iterations** — escalate if stuck
+- **Run ALL checks** after implementation: lint, format, tests, typecheck, build
+- **Commit all 3 phases** — red, green, refactor — each as separate commits
