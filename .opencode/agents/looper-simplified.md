@@ -1,5 +1,5 @@
 ---
-name: looper
+name: looper-simplified
 description: Orchestrates a simplified loop: pull issue, create isolated clone, run TDD, review, merge. Triggered by "/looper" followed by a task description.
 tools:
   bash: true

@@ -74,8 +74,7 @@ DEFAULT_BRANCH=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|
 if [[ "$CURRENT_BRANCH" == "main" || "$CURRENT_BRANCH" == "master" || \
       ( -n "$DEFAULT_BRANCH" && "$CURRENT_BRANCH" == "$DEFAULT_BRANCH" ) ]]; then
     echo "ERROR: Refusing to commit on protected branch '$CURRENT_BRANCH'." >&2
-    echo "Looper must run inside a worktree on a loop/* branch." >&2
-    echo "Use setup-worktree to create an isolated worktree first." >&2
+    echo "Looper must run on a loop/* branch." >&2
     exit 1
 fi
 

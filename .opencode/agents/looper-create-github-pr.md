@@ -449,7 +449,7 @@ Merge manually: gh pr merge <number> --squash --delete-branch
 | Squash merge fails (conflicts) | Report error, print manual merge command, do NOT retry |
 | Squash merge fails (branch protection) | Report error, suggest user review branch protection settings |
 | DB migrations detected | Do NOT merge — leave PR open for manual review |
-| Worktree cleanup fails | Warn but do not abort — merge already succeeded |
+| Clone cleanup fails | Warn but do not abort — merge already succeeded |
 
 ---
 

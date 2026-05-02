@@ -25,6 +25,6 @@ C4Context
 ## Quick Reference
 
 - **L1 Context** - Shows external actors (User, GitHub, Docker, OpenCode) interacting with the system
-- **L2 Container** - Breaks down the system into 4 primary containers (Agents, Scripts, Plugin, Worktrees)
+- **L2 Container** - Breaks down the system into 4 primary containers (Agents, Scripts, Plugin, Clones)
 - **L3 Component** - Details the internal structure of Agents and Script libraries
 - **L4 Code** - Illustrates key implementation patterns and code organization
