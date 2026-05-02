@@ -20,10 +20,10 @@ Entry point that fetches ready issues and dispatches work to sandboxed looper-wo
 
 ```
 Dispatcher
-  ├── Validate environment & yolobox availability
+  ├── Validate environment & mngr availability
   ├── Parse task / auto-select from ready issues
   ├── Claim issue (lock for this dispatcher run)
-  ├── Spawn looper-worker inside yolobox container
+  ├── Spawn looper-worker inside mngr container
   │     └── Worker handles: clone → TDD → review → PR
   └── Clean up dispatcher-side state, report outcome
 ```

@@ -1,6 +1,6 @@
 ---
 name: looper-worker
-description: Worker agent that runs inside a yolobox container. Handles the actual TDD loop: creates isolated clone, runs doer/reviewer subagents, creates PR. Called by looper-dispatcher, never runs yolobox itself.
+description: Worker agent that runs inside an isolated mngr container. Handles the actual TDD loop: creates isolated clone, runs doer/reviewer subagents, creates PR. Called by looper-dispatcher, never runs mngr itself.
 mode: subagent
 tools:
   bash: true
@@ -12,9 +12,9 @@ tools:
 
 # Looper Worker
 
-Runs inside a yolobox container. Does the actual loop work — clone, TDD, review, PR. Never re-invokes yolobox.
+Runs inside an mngr container. Does the actual loop work — clone, TDD, review, PR. Never re-invokes mngr.
 
-**Dispatcher** spawns this inside yolobox. Worker handles:
+**Dispatcher** spawns this inside mngr. Worker handles:
 - Create isolated clone
 - Fetch issue context
 - TDD Loop (doer subagent, max 3 iterations)
@@ -336,7 +336,7 @@ trap cleanup_on_abort EXIT
 
 ## Rules
 
-- **Worker is spawned by dispatcher** — never re-invokes yolobox itself
+- **Worker is spawned by dispatcher** — never re-invokes mngr itself
 - **Dispatcher handles claiming** — worker skips claim-issue
 - **Never write code** — delegate to Doer subagent
 - **Issue IS the spec** — no planner needed
