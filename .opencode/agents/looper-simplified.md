@@ -1,6 +1,6 @@
 ---
 name: looper-simplified
-description: Orchestrates a simplified loop: pull issue, create isolated clone, run TDD, review, merge. Triggered by "/looper" followed by a task description.
+description: Orchestrates a simplified loop: pull issue, create isolated clone, run TDD, review, merge. Triggered by "/looper" followed by a task description. Auto-runs inside yolobox for parallel-safe isolation.
 tools:
   bash: true
   read: true
@@ -17,6 +17,7 @@ Single orchestrator managing the full PDC loop. No planner — the GitHub issue 
 
 ```
 Orchestrator
+  ├── Auto-sandbox in yolobox (if not already inside)
   ├── Validate environment
   ├── Parse task / auto-select issue
   ├── Claim issue (prevent concurrent work)
@@ -36,7 +37,22 @@ Orchestrator
 
 ## Steps
 
-### 0. Verify environment
+### 0. Auto-sandbox in yolobox (if not already inside)
+
+```bash
+# Re-invoke inside yolobox for isolation if not already there
+if [ -z "$YOLOBOX" ] && command -v yolobox >/dev/null 2>&1; then
+    YOLOBOX_BIN="$(command -v yolobox)"
+    REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+    echo "[looper] Re-invoking inside yolobox for isolation..." >&2
+    exec "$YOLOBOX_BIN" run --docker --gh-token --mount "$REPO_ROOT":"$REPO_ROOT" -- \
+        opencode run "/looper $ARGUMENTS"
+fi
+```
+
+This ensures each `/looper` invocation runs in its own yolobox container, so parallel loops don't conflict.
+
+### 1. Verify environment
 
 ```bash
 REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
@@ -59,7 +75,7 @@ done
 git rev-parse --is-inside-work-tree
 ```
 
-### 1. Parse arguments
+### 2. Parse arguments
 
 Parse task from `$ARGUMENTS`:
 ```bash
@@ -83,7 +99,7 @@ else
 fi
 ```
 
-### 2. Generate task name
+### 3. Generate task name
 
 ```bash
 TASK_NAME=$(echo "$TASK_ARG" \
@@ -97,7 +113,7 @@ TASK_NAME=${TASK_NAME##-}
 echo "[looper] Task name: $TASK_NAME" >&2
 ```
 
-### 3. Claim issue (prevent concurrent work)
+### 4. Claim issue (prevent concurrent work)
 
 If we have an issue number, claim it before any work:
 ```bash
@@ -112,7 +128,7 @@ if [ -n "$ISSUE_NUMBER" ]; then
 fi
 ```
 
-### 4. Create isolated clone
+### 5. Create isolated clone
 
 ```bash
 CLONE_DIR=$($SCRIPTS_DIR/setup-clone --task "$TASK_NAME" --unique 2>&1)
@@ -131,7 +147,7 @@ if [ "$BRANCH_COUNT" -gt 5 ]; then
 fi
 ```
 
-### 5. Fetch issue context
+### 6. Fetch issue context
 
 ```bash
 FETCH_OUTPUT=$($SCRIPTS_DIR/fetch-issue-context --args "$TASK_ARG" 2>&1); FETCH_EXIT=$?
@@ -149,7 +165,7 @@ fi
 echo "[looper] Working on issue #$ISSUE_NUMBER" >&2
 ```
 
-### 6. TDD Loop (Doer — max 3 iterations)
+### 7. TDD Loop (Doer — max 3 iterations)
 
 ```
 echo ""
@@ -202,7 +218,7 @@ done
 - Doer emits `ESCALATE:` → abort
 - After 3 iterations with no reviewer PASS → abort
 
-### 7. Reviewer Loop (max 2 rounds)
+### 8. Reviewer Loop (max 2 rounds)
 
 ```
 echo ""
@@ -289,7 +305,7 @@ MAX_TDD_ITERATIONS: $MAX_TDD_ITERATIONS") 2>&1) && DOER_EXIT=0 || DOER_EXIT=$?
 done
 ```
 
-### 8. Sync and create PR
+### 9. Sync and create PR
 
 ```bash
 echo "[looper] Review PASSED. Syncing with remote..." >&2
