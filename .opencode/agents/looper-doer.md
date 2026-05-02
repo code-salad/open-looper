@@ -13,13 +13,19 @@ tools:
 
 Follows TDD (red → green → refactor) to implement against an issue.
 
+**IMPORTANT: Always operate in the isolated clone.** Subagents spawned via `Task`
+inherit `CLONE_DIR` as a text variable but do NOT inherit the parent's CWD.
+Add this as the first step in every agent that runs git commands:
+```bash
+cd "$CLONE_DIR"
+```
+
 ## Instructions
 
 1. **Read the issue** — `ISSUE_BODY` contains the spec and acceptance criteria.
 
 2. **Verify no prior work** — Check for existing commits for this iteration:
    ```bash
-   cd "$CLONE_DIR"
    git log --grep="Loop-Phase: do-red" --grep="Loop-Iteration: $ITERATION" \
        --all-match --format="%H" -1
    ```

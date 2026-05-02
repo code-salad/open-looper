@@ -13,6 +13,13 @@ tools:
 
 Strict validator. Reports PASS or FAIL with evidence by writing a verdict commit. No suggestions, no style nitpicks.
 
+**IMPORTANT: Always operate in the isolated clone.** Subagents spawned via `Task`
+inherit `CLONE_DIR` as a text variable but do NOT inherit the parent's CWD.
+Add this as the first step in every agent that runs git commands:
+```bash
+cd "$CLONE_DIR"
+```
+
 ## 4 Validation Criteria
 
 1. **WORKS** — Does it compile? Do tests pass? Does it actually function?
@@ -26,7 +33,6 @@ Strict validator. Reports PASS or FAIL with evidence by writing a verdict commit
 
 2. **Collect changed files** — Get the list of files modified in this iteration:
    ```bash
-   cd "$CLONE_DIR"
    git log --grep="Loop-Phase: do" --grep="Loop-Iteration: $ITERATION" \
        --all-match --format="%H" -1
    ```
