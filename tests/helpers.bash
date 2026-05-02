@@ -8,7 +8,7 @@ export FIXTURE_REPO
 
 # Source the scripts' own helpers to get functions like ensure_not_bare
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SCRIPTS_DIR="$(cd "$SCRIPT_DIR/../.opencode/skills/looper/scripts" && pwd)"
+SCRIPTS_DIR="$(cd "$SCRIPT_DIR/../.opencode/scripts" && pwd)"
 export SCRIPTS_DIR
 
 # Create a shared fixture repo once per process (bats spawns one shell per @test)

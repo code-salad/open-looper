@@ -61,7 +61,7 @@ teardown() {
 # ------------------------------------------------------------------------
 
 get_claim_issue_path() {
-    echo "$BATS_TEST_DIRNAME/../.opencode/skills/looper/scripts/claim-issue"
+    echo "${SCRIPTS_DIR:-$BATS_TEST_DIRNAME/../.opencode/scripts}/claim-issue"
 }
 
 # ------------------------------------------------------------------------
